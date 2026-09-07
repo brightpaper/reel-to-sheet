@@ -397,6 +397,8 @@ function startupConfirm(){
 //     (d) do device ek saath save karein to rev check se pakda jayega
 // ═══════════════════════════════════════════════════════════════════
 window.LOADED_REV  = {};    // co -> abhi memory me kaunsa rev load hai
+window.LOADED_REVS = {};    // co -> kaun-kaun se rev cloud pe zinda hain (meta se)
+window.LOADED_PURGED = {};  // co -> purani safai kahan tak ho chuki hai
 window.SERVER_SEEN = {};    // co -> server se (cache se nahi) data aa chuka?
 window.APP_READY   = false; // false = entry BAND
 window._savingNow  = false;
@@ -495,6 +497,10 @@ function _loadDoc(co, d, fromCache, attempt){
     }
   };
   if(d.v===2 && d.nchunks){                      // ── naya format
+    // meta me likha hai ki abhi kaun-kaun se rev zinda hain aur safai kahan tak
+    // ho chuki hai. Isse koi rev kabhi anaath (orphan) nahi rehta.
+    window.LOADED_REVS[co]   = Array.isArray(d.revs) ? d.revs.slice() : [];
+    window.LOADED_PURGED[co] = (typeof d.purgedUpTo === 'number') ? d.purgedUpTo : 0;
     // rev immutable hai — jo rev pehle se memory me hai wahi dobara aaya to
     // kuch mat karo. (apne hi save ka echo — warna form typing ke beech re-render)
     if(DBS[co] && window.LOADED_REV[co]===d.rev){
@@ -591,6 +597,20 @@ function fbCloudSave(){
   var newRev=((typeof expect==='number')?expect:0)+1;
   var pre=base+'__r'+newRev+'__';
 
+  // ── kaun rakhna hai, kaun hatana hai ──
+  // meta me poori list rehti hai, isliye koi rev kabhi anaath nahi hota.
+  var liveRevs=(window.LOADED_REVS[co]||[]).filter(function(r){return typeof r==='number';});
+  if(liveRevs.indexOf(newRev)<0) liveRevs.push(newRev);
+  liveRevs.sort(function(a,b){return a-b;});
+  var keepRevs=liveRevs.slice(-3);                       // aakhri 3 zinda rahenge
+  var dropRevs=liveRevs.slice(0,-3);                     // baaki hatao
+  // purane anaath rev (jo kisi list me hain hi nahi) — thode-thode karke saaf karo
+  var purgedUpTo=window.LOADED_PURGED[co]||0;
+  var purgeTo=Math.min(purgedUpTo+20, newRev-3);         // ek baar me max 20 rev
+  var purgeList=[];
+  for(var pr=purgedUpTo+1; pr<=purgeTo; pr++) if(keepRevs.indexOf(pr)<0) purgeList.push(pr);
+  var newPurged=(purgeTo>purgedUpTo)?purgeTo:purgedUpTo;
+
   // 1) chunks NAYE naam se likho — koi purana reader affect nahi hota
   var writes=parts.map(function(p,ix){
     return fbDB.collection('db').doc(pre+ix).set({ chunk:p, part:ix, rev:newRev });
@@ -610,14 +630,18 @@ function fbCloudSave(){
           var er=new Error('conflict'); er.__conflict=true; er.serverRev=curRev; er.myRev=expect; throw er;
         }
         tx.set(ref, { v:2, rev:newRev, nchunks:parts.length, chunked:true,
+          revs:keepRevs, purgedUpTo:newPurged,
           lastUpdatedBy:window.FB_USER.email,
           lastUpdatedAt:firebase.firestore.FieldValue.serverTimestamp() });
       });
     });
   }).then(function(){
     window.LOADED_REV[co]=newRev;
+    window.LOADED_REVS[co]=keepRevs.slice();
+    window.LOADED_PURGED[co]=newPurged;
     fbShowSyncBadge('✅ Saved (v'+newRev+')','rgba(26,107,60,.9)');
-    _fbCleanupOldRevs(base,newRev);
+    // meta commit ho chuka — ab purane chunks hatana surakshit hai
+    dropRevs.concat(purgeList).forEach(function(r){ _fbDeleteRev(base,r,parts.length); });
   }).catch(function(err){
     if(err && err.__conflict){
       emergencyBackup('conflict');
@@ -644,22 +668,11 @@ function fbCloudSave(){
   });
 }
 
-// ek rev ke chunks hatao (conflict pe apne orphans)
+// ek rev ke saare chunks hatao.
+// (na-maujood doc delete karna no-op hai, isliye pehle get karne ki zaroorat nahi)
 function _fbDeleteRev(base, rev, n){
-  for(var i=0;i<Math.max(n||0,4);i++) fbDB.collection('db').doc(base+'__r'+rev+'__'+i).delete().catch(function(){});
-}
-// 3 revision peeche tak sab RAKHO — usse purane revs hatao.
-// (delete non-existent doc = no-op, isliye get ki zaroorat nahi)
-// Spark plan pe writes limited hain (20k/din), isliye har save pe nahi —
-// har 5ve REV pe safai (rev se decide, counter se nahi — counter page refresh
-// pe reset ho jaata tha aur purane rev jama hote rehte the).
-function _fbCleanupOldRevs(base, curRev){
-  if((curRev % 5) !== 0) return;
-  for(var rv=curRev-3; rv>=1 && rv>curRev-9; rv--){
-    (function(r){
-      for(var i=0;i<4;i++) fbDB.collection('db').doc(base+'__r'+r+'__'+i).delete().catch(function(){});
-    })(rv);
-  }
+  var upto=Math.max(n||0, 6);          // 6 tak — data badhne pe bhi peeche na chhoote
+  for(var i=0;i<upto;i++) fbDB.collection('db').doc(base+'__r'+rev+'__'+i).delete().catch(function(){});
 }
 </script>
 
@@ -4175,7 +4188,10 @@ function fscUpdate(i){
       o.lines[i].freshCutL=L.freshCutL||''; o.lines[i].freshCutW=L.freshCutW||''; o.lines[i].freshCutG=L.freshCutG||'';
     }
   }
-  dbSave(true);
+  // ⚠ Ye har KEYSTROKE pe chalta hai (oninput). Pehle yahan dbSave(true) tha —
+  // yaani "120" type karne pe 3 poore save = 6 naye document. Isliye ab debounce:
+  // typing rukne ke ~1.2 sec baad ek hi save jayega.
+  dbSave();
 }
 function openManualSticker(){
   editCtx={type:'manualsticker'};
