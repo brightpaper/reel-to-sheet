@@ -216,6 +216,22 @@ var CO = 'jayambe';   // current company
 </div>
 <div id="fb-sync-badge" style="display:none;">☁️ Syncing</div>
 <div id="toast"></div>
+<!-- ═══ LOAD GATE — asli data aane tak entry band [Phase 1] ═══ -->
+<div id="load-gate" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.94);z-index:7000;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:#fff;text-align:center;padding:24px;">
+  <div style="font-size:40px;">🔄</div>
+  <div id="load-gate-msg" style="font-size:16px;font-weight:bold;">Cloud se data load ho raha hai…</div>
+  <div style="font-size:12px;opacity:.72;max-width:400px;line-height:1.6;">Jab tak poora data na aa jaye tab tak entry band hai —<br>taaki koi entry gum na ho.</div>
+  <button id="load-gate-ro" onclick="loadGateReadOnly()" style="display:none;margin-top:6px;padding:9px 18px;border:1px solid rgba(255,255,255,.45);border-radius:6px;background:rgba(255,255,255,.12);color:#fff;font-size:13px;font-weight:bold;cursor:pointer;">👁 Sirf dekhne ke liye kholo (entry band rahegi)</button>
+</div>
+
+<!-- ═══ SYNC ERROR — khud band nahi hota [Phase 1] ═══ -->
+<div id="sync-err" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:9000;align-items:center;justify-content:center;padding:18px;">
+  <div style="background:#fff;border-radius:10px;max-width:460px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.35);">
+    <div style="background:#b91c1c;color:#fff;padding:12px 18px;font-size:15px;font-weight:bold;" id="sync-err-title">⚠ Error</div>
+    <div style="padding:16px 18px;font-size:13px;line-height:1.7;color:#222;" id="sync-err-msg"></div>
+    <div style="padding:0 18px 16px;display:flex;gap:8px;flex-wrap:wrap;" id="sync-err-btns"></div>
+  </div>
+</div>
 
 <!-- BACKUP REMINDER POPUP -->
 <div id="backup-reminder" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:5000;align-items:center;justify-content:center;padding:16px;">
@@ -324,9 +340,10 @@ function isValidReel(r){
 function fbInitAppAfterLogin(){
   if(window.FB_INITIALIZED) return;
   window.FB_INITIALIZED=true;
+  setAppReady(false);        // [Phase 1] GATE ON — asli data aane tak entry band
   attachCompany('jayambe');
-  // data load hone ke baad startup selector (company + FY)
-  setTimeout(function(){ if(window.showStartupModal) showStartupModal(); }, 1500);
+  // [Phase 1] startup modal ab TIMER se nahi khulta — server se data aane par
+  // onFirstServerLoad() usko kholta hai. Warna blank/purani DB pe entry ho jaati thi.
 }
 function showStartupModal(){
   var coBox=document.getElementById('startup-co'); if(!coBox) return;
@@ -369,77 +386,279 @@ function startupConfirm(){
   setTimeout(function(){ if(window.showBackupReminder) showBackupReminder(); }, 800);
 }
 
-function attachCompany(co){
-  var docRef=fbDB.collection('db').doc(SHEET_DOCS[co]);
-  if(co===CO) fbShowSyncBadge('🔄 Loading...','rgba(14,116,144,.9)');
-  LISTENERS[co]=docRef.onSnapshot(function(doc){
-    if(doc.exists){
-      var d=doc.data();
-      // chunked data: saare chunks (base, base__1, base__2...) fetch karke jodo
-      if(d.chunked && d.nchunks){
-        var base=SHEET_DOCS[co], n=d.nchunks, pieces=new Array(n);
-        pieces[0]=d.chunk||'';
-        var need=[];
-        for(var p=1;p<n;p++){ (function(idx){ need.push(fbDB.collection('db').doc(base+'__'+idx).get().then(function(sn){ pieces[idx]=(sn.exists&&sn.data().chunk)||''; })); })(p); }
-        Promise.all(need).then(function(){
-          _applyRemote(co, pieces.join(''));
-        }).catch(function(e){ console.error('chunk load',co,e); });
-      } else if(d.payload){
-        _applyRemote(co, d.payload);
-      }
-    } else {
-      DBS[co]=blankDB();
-      if(co===CO){ DB=DBS[co]; if(window.renderAll) renderAll(); fbShowSyncBadge('✅ Connected (fresh)','rgba(26,107,60,.9)'); }
-    }
-  }, function(err){ console.error('listener',co,err); if(co===CO) fbShowSyncBadge('⚠ '+err.code,'rgba(185,28,28,.9)'); });
+// ═══════════════════════════════════════════════════════════════════
+// SYNC v2 — race-free, rev-based   [Phase 1 fix — 2026-09-07]
+//   db/<base>              = sirf META { v:2, rev, nchunks, ... }
+//   db/<base>__r<rev>__<i> = data chunks — IMMUTABLE (ek baar likhe, kabhi
+//                            badle nahi). Isliye:
+//     (a) aadha-purana + aadha-naya chunk kabhi nahi judega
+//     (b) cache se padho ya server se — rev same to data bilkul same
+//     (c) META ka flip atomic hai -> reader ko YA poora purana YA poora naya
+//     (d) do device ek saath save karein to rev check se pakda jayega
+// ═══════════════════════════════════════════════════════════════════
+window.LOADED_REV  = {};    // co -> abhi memory me kaunsa rev load hai
+window.SERVER_SEEN = {};    // co -> server se (cache se nahi) data aa chuka?
+window.APP_READY   = false; // false = entry BAND
+window._savingNow  = false;
+window._saveAgain  = false;
+
+// ─── LOAD GATE: asli data aane tak entry band ───
+function setAppReady(on){
+  window.APP_READY = !!on;
+  var g=document.getElementById('load-gate');
+  if(g) g.style.display = on ? 'none' : 'flex';
 }
-function _applyRemote(co, payloadStr){
-  try {
-    var remote=JSON.parse(payloadStr);
-    var db=blankDB();
-    ['orders','reels','purchases','products','parties','mills','tones','divisions','cores','sizes','wastageSales','sales','cutSales','freshSales','manualWastage','reelSales','cutRates','cutReg'].forEach(function(k){ if(remote[k]) db[k]=remote[k]; });
-    var hadGarbage=false;
-    if(db.reels){ var bn=db.reels.length; db.reels=db.reels.filter(isValidReel); if(db.reels.length!==bn) hadGarbage=true; }
-    if(db.purchases){ var bp=db.purchases.length; db.purchases=db.purchases.filter(isValidReel); if(db.purchases.length!==bp) hadGarbage=true; }
-    DBS[co]=db;
-    if(co===CO){ DB=DBS[co]; if(window.renderAll) try{renderAll();}catch(e){console.warn(e);} fbShowSyncBadge('✅ Synced','rgba(26,107,60,.9)'); }
-    if(hadGarbage && window.FB_USER && co===CO){ setTimeout(function(){ fbCloudSave(); }, 800); }
-  } catch(e){ console.error('parse',co,e); }
+function gateMsg(msg, showRO){
+  var t=document.getElementById('load-gate-msg'); if(t) t.textContent=msg;
+  var b=document.getElementById('load-gate-ro'); if(b) b.style.display = showRO?'inline-block':'none';
+}
+function loadGateReadOnly(){
+  var g=document.getElementById('load-gate'); if(g) g.style.display='none';
+  window.APP_READY=false;               // dekhna allowed, entry phir bhi BAND
+  showToast('👁 Read-only — entry save nahi hogi jab tak cloud na jude',true);
+}
+
+// ─── BLOCKING ERROR MODAL (khud band nahi hota) ───
+function showSyncError(title, msgHtml, buttons){
+  var m=document.getElementById('sync-err'); if(!m){ alert(title); return; }
+  document.getElementById('sync-err-title').textContent=title;
+  document.getElementById('sync-err-msg').innerHTML=msgHtml;
+  document.getElementById('sync-err-btns').innerHTML=(buttons||[]).map(function(b){
+    return '<button onclick="'+b.fn+'" style="padding:9px 16px;border:none;border-radius:6px;'+
+           'font-weight:bold;font-size:13px;cursor:pointer;background:'+(b.bg||'#2d6cc0')+';color:#fff;">'+b.label+'</button>';
+  }).join('');
+  m.style.display='flex';
+}
+function hideSyncError(){ var m=document.getElementById('sync-err'); if(m) m.style.display='none'; }
+
+// ─── EMERGENCY BACKUP: data kabhi gum na ho ───
+function emergencyBackup(tag){
+  try{
+    var payload={ _app:'RMS_ReelToSheet', _version:1, _emergency:(tag||'save'),
+      _at:new Date().toISOString(), bright:DBS.bright||blankDB(), jayambe:DBS.jayambe||blankDB() };
+    var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download='RMS_EMERGENCY_'+(tag||'save')+'_'+Date.now()+'.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url); return true;
+  }catch(e){ console.error('emergency backup fail',e); return false; }
+}
+
+function onFirstServerLoad(){
+  if(window._startupShown) return;
+  window._startupShown=true;
+  if(window.showStartupModal) showStartupModal();
+}
+
+function attachCompany(co){
+  var base=SHEET_DOCS[co];
+  var docRef=fbDB.collection('db').doc(base);
+  if(co===CO){
+    fbShowSyncBadge('🔄 Loading...','rgba(14,116,144,.9)');
+    gateMsg('Cloud se data load ho raha hai…', false);
+    setTimeout(function(){                       // 20 sec me na jude to read-only ka option
+      if(!window.SERVER_SEEN[co]) gateMsg('Cloud se jud nahi paa rahe — internet check karo.', true);
+    }, 20000);
+  }
+  LISTENERS[co]=docRef.onSnapshot({includeMetadataChanges:true}, function(doc){
+    // apni hi bina-confirm hui write ka echo — ignore
+    if(doc.metadata.hasPendingWrites) return;
+    var fromCache=doc.metadata.fromCache;
+    // ⚠ server se ek baar data aane ke baad CACHE ki purani copy pe bharosa MAT karo
+    if(fromCache && window.SERVER_SEEN[co]) return;
+    if(!doc.exists){
+      if(fromCache) return;
+      DBS[co]=blankDB(); window.LOADED_REV[co]=0; window.SERVER_SEEN[co]=true;
+      if(co===CO){ DB=DBS[co]; if(window.renderAll) renderAll(); setAppReady(true);
+        fbShowSyncBadge('✅ Connected (fresh)','rgba(26,107,60,.9)'); onFirstServerLoad(); }
+      return;
+    }
+    _loadDoc(co, doc.data(), fromCache, 0);
+  }, function(err){
+    console.error('listener',co,err);
+    if(co===CO){ fbShowSyncBadge('⚠ '+err.code,'rgba(185,28,28,.9)');
+      gateMsg('Cloud error: '+err.code+' — entry band hai.', true); }
+  });
+}
+
+function _loadDoc(co, d, fromCache, attempt){
+  var base=SHEET_DOCS[co];
+  var fail=function(e){
+    console.error('chunk load',co,e);
+    if(attempt<3){ setTimeout(function(){ _loadDoc(co,d,fromCache,attempt+1); }, 1200*(attempt+1)); return; }
+    if(co===CO){
+      fbShowSyncBadge('⚠ Load fail','rgba(185,28,28,.9)');
+      gateMsg('Data poora nahi aaya — entry band hai.', true);
+      showSyncError('⚠ Data poora load nahi hua',
+        'Cloud se data ke kuch hisse nahi mile.<br><b>Entry mat karo</b> — warna wo gum ho jayegi.<br><br>Page refresh karo.',
+        [{label:'🔄 Refresh',fn:'location.reload()'}]);
+    }
+  };
+  if(d.v===2 && d.nchunks){                      // ── naya format
+    // rev immutable hai — jo rev pehle se memory me hai wahi dobara aaya to
+    // kuch mat karo. (apne hi save ka echo — warna form typing ke beech re-render)
+    if(DBS[co] && window.LOADED_REV[co]===d.rev){
+      if(co===CO && !fromCache){ window.SERVER_SEEN[co]=true; setAppReady(true); onFirstServerLoad(); }
+      return;
+    }
+    var pre=base+'__r'+d.rev+'__', gets=[];
+    for(var i=0;i<d.nchunks;i++) (function(ix){
+      gets.push(fbDB.collection('db').doc(pre+ix).get().then(function(sn){
+        if(!sn.exists) throw new Error('chunk '+ix+' missing (rev '+d.rev+')');
+        return sn.data().chunk||'';
+      }));
+    })(i);
+    Promise.all(gets).then(function(parts){ _applyRemote(co, parts.join(''), fromCache, d.rev); }).catch(fail);
+  } else if(d.chunked && d.nchunks){             // ── purana v1 format (backward compat)
+    var n=d.nchunks, pieces=new Array(n), need=[];
+    pieces[0]=d.chunk||'';
+    for(var p=1;p<n;p++) (function(ix){
+      need.push(fbDB.collection('db').doc(base+'__'+ix).get().then(function(sn){
+        if(!sn.exists) throw new Error('v1 chunk '+ix+' missing');
+        pieces[ix]=sn.data().chunk||'';
+      }));
+    })(p);
+    Promise.all(need).then(function(){ _applyRemote(co, pieces.join(''), fromCache, null); }).catch(fail);
+  } else if(d.payload){
+    _applyRemote(co, d.payload, fromCache, null);
+  } else { fail(new Error('doc me koi payload nahi')); }
+}
+
+function _applyRemote(co, payloadStr, fromCache, rev){
+  var remote;
+  try { remote=JSON.parse(payloadStr); }
+  catch(e){
+    console.error('parse',co,e);
+    // ⚠ purana memory wala data waise hi rehne do — blank se replace MAT karo
+    if(co===CO){
+      gateMsg('Cloud data toota hua hai — entry band.', false);
+      showSyncError('⚠ Cloud data padha nahi ja saka',
+        'Data toota hua mila (JSON parse fail).<br><b>Entry mat karo.</b><br><br>Page refresh karo, phir bhi na chale to admin ko batao.',
+        [{label:'🔄 Refresh',fn:'location.reload()'}]);
+    }
+    return;
+  }
+  var db=blankDB();
+  ['orders','reels','purchases','products','parties','mills','tones','divisions','cores','sizes',
+   'wastageSales','sales','cutSales','freshSales','manualWastage','reelSales','cutRates','cutReg']
+    .forEach(function(k){ if(remote[k]) db[k]=remote[k]; });
+
+  // ⚠ Phase 1: adhoori reel/purchase ab CHUP-CHAAP DELETE NAHI hongi.
+  // Pehle inhe filter karke cloud pe wapas save kar diya jaata tha = permanent data loss.
+  var bad=(db.reels||[]).filter(function(r){return !isValidReel(r);}).length
+        +(db.purchases||[]).filter(function(r){return !isValidReel(r);}).length;
+  if(bad) console.warn('[RMS] '+bad+' adhoori reel/purchase entries (rno ya weight khali). DELETE nahi ki gayi.');
+
+  DBS[co]=db;
+  if(rev!=null) window.LOADED_REV[co]=rev;
+  if(!fromCache) window.SERVER_SEEN[co]=true;
+
+  if(co===CO){
+    DB=DBS[co];
+    if(window.renderAll) try{ renderAll(); }catch(e){ console.warn(e); }
+    if(fromCache){
+      fbShowSyncBadge('📴 Offline data — entry BAND','rgba(146,64,14,.95)');
+      gateMsg('Offline data dikha rahe hain. Cloud se judne ka intezaar…', true);
+    } else {
+      setAppReady(true);
+      fbShowSyncBadge('✅ Synced (v'+(rev==null?'1':rev)+')','rgba(26,107,60,.9)');
+      onFirstServerLoad();
+    }
+  }
 }
 
 function fbCloudSave(){
   if(!window.FB_USER || !DBS[CO]) return;
-  fbShowSyncBadge('⏳ Saving...','rgba(146,64,14,.9)');
-  var payload = JSON.stringify(DBS[CO]);
-  var CHUNK = 700000;                       // ~0.7 MB per doc (1MB limit se safe)
-  var parts=[];
-  for(var i=0;i<payload.length;i+=CHUNK){ parts.push(payload.slice(i,i+CHUNK)); }
-  if(parts.length===0) parts=[''];
-  var base=SHEET_DOCS[CO];
-  var meta={ nchunks:parts.length, chunked:true, lastUpdatedBy:window.FB_USER.email, lastUpdatedAt:firebase.firestore.FieldValue.serverTimestamp() };
-  // pehla document: meta + chunk 0 (purana 'payload' field NAHI, taaki 1MB me na bandhe)
-  var writes=[];
-  var d0=Object.assign({ chunk:parts[0], part:0 }, meta);
-  writes.push(fbDB.collection('db').doc(base).set(d0));
-  for(var p=1;p<parts.length;p++){
-    writes.push(fbDB.collection('db').doc(base+'__'+p).set({ chunk:parts[p], part:p }));
+  if(!window.APP_READY){
+    showSyncError('⚠ Entry SAVE NAHI hui',
+      'Cloud se data abhi poora load nahi hua, isliye ye entry <b>cloud pe save nahi ki gayi</b>.<br><br>'+
+      'Page refresh karo aur entry dobara karo.',
+      [{label:'🔄 Refresh',fn:'location.reload()'},
+       {label:'💾 Local backup',bg:'#1a6b3c',fn:"emergencyBackup('not-ready')"}]);
+    return;
   }
-  Promise.all(writes)
-    .then(function(){
-      fbShowSyncBadge('✅ Saved','rgba(26,107,60,.9)');
-      // purane extra chunks (agar ab kam ho gaye) delete kar do — safaai
-      _fbCleanupOldChunks(base, parts.length);
-    })
-    .catch(function(err){ fbShowSyncBadge('⚠ Save fail: '+err.code,'rgba(185,28,28,.9)'); });
+  if(window._savingNow){ window._saveAgain=true; return; }   // ek waqt me sirf ek save
+  window._savingNow=true;
+  fbShowSyncBadge('⏳ Saving...','rgba(146,64,14,.9)');
+
+  var co=CO, base=SHEET_DOCS[co];
+  var payload=JSON.stringify(DBS[co]);
+  var CHUNK=700000, parts=[];
+  for(var i=0;i<payload.length;i+=CHUNK) parts.push(payload.slice(i,i+CHUNK));
+  if(!parts.length) parts=[''];
+
+  var expect=window.LOADED_REV[co];
+  var newRev=((typeof expect==='number')?expect:0)+1;
+  var pre=base+'__r'+newRev+'__';
+
+  // 1) chunks NAYE naam se likho — koi purana reader affect nahi hota
+  var writes=parts.map(function(p,ix){
+    return fbDB.collection('db').doc(pre+ix).set({ chunk:p, part:ix, rev:newRev });
+  });
+
+  Promise.all(writes).then(function(){
+    // 2) META atomically flip — sirf tab jab server ka rev wahi ho jo humne load kiya tha
+    return fbDB.runTransaction(function(tx){
+      var ref=fbDB.collection('db').doc(base);
+      return tx.get(ref).then(function(sn){
+        var cur=sn.exists?sn.data():null;
+        var curRev=(cur && cur.v===2)?(cur.rev||0):null;
+        // curRev===null => server abhi purane v1 pe hai => pehli migration, allow.
+        // warna server ka rev humare load kiye rev se match hona CHAHIYE.
+        // (expect undefined + curRev number = humne v1 load kiya par koi aur migrate kar chuka => stale)
+        if(curRev!==null && curRev!==expect){
+          var er=new Error('conflict'); er.__conflict=true; er.serverRev=curRev; er.myRev=expect; throw er;
+        }
+        tx.set(ref, { v:2, rev:newRev, nchunks:parts.length, chunked:true,
+          lastUpdatedBy:window.FB_USER.email,
+          lastUpdatedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      });
+    });
+  }).then(function(){
+    window.LOADED_REV[co]=newRev;
+    fbShowSyncBadge('✅ Saved (v'+newRev+')','rgba(26,107,60,.9)');
+    _fbCleanupOldRevs(base,newRev);
+  }).catch(function(err){
+    if(err && err.__conflict){
+      emergencyBackup('conflict');
+      _fbDeleteRev(base,newRev,parts.length);      // apne likhe orphan chunks hatao
+      fbShowSyncBadge('⚠ Conflict — save nahi hua','rgba(185,28,28,.9)');
+      showSyncError('⚠ Kisi aur ne abhi data badla',
+        'Tumhari entry <b>cloud pe save NAHI hui</b> — kisi doosre device ne beech me data update kar diya.<br><br>'+
+        '✅ Tumhara poora data <b>emergency backup file</b> me download ho gaya hai (Downloads folder dekho) — kuch gaya nahi.<br><br>'+
+        'Ab page refresh karo aur ye entry dobara daalo.',
+        [{label:'🔄 Refresh',fn:'location.reload()'},
+         {label:'💾 Backup dobara',bg:'#1a6b3c',fn:"emergencyBackup('conflict')"}]);
+    } else {
+      fbShowSyncBadge('⚠ Save fail','rgba(185,28,28,.9)');
+      showSyncError('⚠ Save FAIL ho gaya',
+        'Ye entry cloud pe <b>save nahi hui</b>.<br>Reason: <code>'+((err&&(err.code||err.message))||'unknown')+'</code><br><br>'+
+        'Internet check karke dobara try karo.',
+        [{label:'🔁 Dobara try karo',fn:'hideSyncError();fbCloudSave()'},
+         {label:'💾 Local backup',bg:'#1a6b3c',fn:"emergencyBackup('savefail')"},
+         {label:'🔄 Refresh',bg:'#6b7280',fn:'location.reload()'}]);
+    }
+  }).then(function(){
+    window._savingNow=false;
+    if(window._saveAgain){ window._saveAgain=false; setTimeout(fbCloudSave,50); }
+  });
 }
-// zyada purane chunks jo ab use nahi ho rahe unhe hatao
-function _fbCleanupOldChunks(base, keepN){
-  for(var k=keepN;k<keepN+8;k++){   // 8 extra tak check
-    (function(idx){
-      fbDB.collection('db').doc(base+'__'+idx).get().then(function(sn){
-        if(sn.exists) fbDB.collection('db').doc(base+'__'+idx).delete().catch(function(){});
-      }).catch(function(){});
-    })(k);
+
+// ek rev ke chunks hatao (conflict pe apne orphans)
+function _fbDeleteRev(base, rev, n){
+  for(var i=0;i<Math.max(n||0,4);i++) fbDB.collection('db').doc(base+'__r'+rev+'__'+i).delete().catch(function(){});
+}
+// 3 revision peeche tak sab RAKHO — usse purane revs hatao.
+// (delete non-existent doc = no-op, isliye get ki zaroorat nahi)
+// Spark plan pe writes limited hain (20k/din), isliye har save pe nahi —
+// har 5ve save pe safai, aur tab ek saath 5 purane rev nipta dete hain.
+window._cleanupTick = 0;
+function _fbCleanupOldRevs(base, curRev){
+  if((++window._cleanupTick % 5) !== 0) return;
+  for(var rv=curRev-3; rv>=1 && rv>curRev-8; rv--){
+    (function(r){
+      for(var i=0;i<4;i++) fbDB.collection('db').doc(base+'__r'+r+'__'+i).delete().catch(function(){});
+    })(rv);
   }
 }
 </script>
@@ -1259,6 +1478,13 @@ function S(id,v){ var e=document.getElementById(id); if(e) e.value=v; }
 function showToast(msg,err){ var t=document.getElementById('toast'); t.textContent=msg; t.className=err?'err':''; t.style.display='block'; setTimeout(function(){t.style.display='none';},2500); }
 
 function dbSave(immediate){
+  // [Phase 1] data poora load hue bina save = purani/blank copy cloud pe chadh jayegi
+  if(!window.APP_READY){
+    if(window.showSyncError) showSyncError('⚠ Entry SAVE NAHI hui',
+      'Cloud se data abhi poora load nahi hua, isliye ye entry <b>save nahi ki gayi</b>.<br><br>Page refresh karo aur entry dobara karo.',
+      [{label:'🔄 Refresh',fn:'location.reload()'}]);
+    return;
+  }
   if(_saveTimer) clearTimeout(_saveTimer);
   if(immediate) fbCloudSave();
   else _saveTimer=setTimeout(fbCloudSave,1200);
