@@ -651,11 +651,11 @@ function _fbDeleteRev(base, rev, n){
 // 3 revision peeche tak sab RAKHO — usse purane revs hatao.
 // (delete non-existent doc = no-op, isliye get ki zaroorat nahi)
 // Spark plan pe writes limited hain (20k/din), isliye har save pe nahi —
-// har 5ve save pe safai, aur tab ek saath 5 purane rev nipta dete hain.
-window._cleanupTick = 0;
+// har 5ve REV pe safai (rev se decide, counter se nahi — counter page refresh
+// pe reset ho jaata tha aur purane rev jama hote rehte the).
 function _fbCleanupOldRevs(base, curRev){
-  if((++window._cleanupTick % 5) !== 0) return;
-  for(var rv=curRev-3; rv>=1 && rv>curRev-8; rv--){
+  if((curRev % 5) !== 0) return;
+  for(var rv=curRev-3; rv>=1 && rv>curRev-9; rv--){
     (function(r){
       for(var i=0;i<4;i++) fbDB.collection('db').doc(base+'__r'+r+'__'+i).delete().catch(function(){});
     })(rv);
