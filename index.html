@@ -396,10 +396,17 @@ function startupConfirm(){
 //     (c) META ka flip atomic hai -> reader ko YA poora purana YA poora naya
 //     (d) do device ek saath save karein to rev check se pakda jayega
 // ═══════════════════════════════════════════════════════════════════
-window.LOADED_REV  = {};    // co -> abhi memory me kaunsa rev load hai
-window.LOADED_REVS = {};    // co -> kaun-kaun se rev cloud pe zinda hain (meta se)
-window.LOADED_PURGED = {};  // co -> purani safai kahan tak ho chuki hai
+window.LOADED_REV  = {};    // co -> abhi memory me kaunsa rev load hai (conflict check ke liye)
+window.LOADED_LIVE = {};    // co -> [{r:rev, w:wid}] jo cloud pe zinda hain
+window.LOADED_WID  = {};    // co -> abhi chal rahe version ka wid
+window.LOADED_APPLIED_WID = {};  // co -> jo wid humne last apply kiya
+window.LOADED_PURGED = {};  // co -> purane __r<n>__ documents ki safai kahan tak hui
 window.SERVER_SEEN = {};    // co -> server se (cache se nahi) data aa chuka?
+
+// har save ka apna unique naam — do device kabhi ek hi document pe nahi likhenge
+function newWid(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+}
 window.APP_READY   = false; // false = entry BAND
 window._savingNow  = false;
 window._saveAgain  = false;
@@ -496,25 +503,33 @@ function _loadDoc(co, d, fromCache, attempt){
         [{label:'🔄 Refresh',fn:'location.reload()'}]);
     }
   };
-  if(d.v===2 && d.nchunks){                      // ── naya format
-    // meta me likha hai ki abhi kaun-kaun se rev zinda hain aur safai kahan tak
-    // ho chuki hai. Isse koi rev kabhi anaath (orphan) nahi rehta.
-    window.LOADED_REVS[co]   = Array.isArray(d.revs) ? d.revs.slice() : [];
+  if((d.v===3 || d.v===2) && d.nchunks){         // ── naya format (v3 = wid-based, v2 = rev-based)
+    // v3: har save ka apna UNIQUE naam (wid). Do client kabhi ek hi document pe
+    //     nahi likhte, isliye ek dusre ke chunks overwrite/delete nahi kar sakte.
+    // v2: purana (rev-based) — sirf padhne ke liye rakha hai.
+    var isV3=(d.v===3 && !!d.wid);
+    window.LOADED_LIVE[co]   = Array.isArray(d.live) ? d.live.slice() : [];
     window.LOADED_PURGED[co] = (typeof d.purgedUpTo === 'number') ? d.purgedUpTo : 0;
-    // rev immutable hai — jo rev pehle se memory me hai wahi dobara aaya to
-    // kuch mat karo. (apne hi save ka echo — warna form typing ke beech re-render)
-    if(DBS[co] && window.LOADED_REV[co]===d.rev){
+    window.LOADED_WID[co]    = isV3 ? d.wid : null;
+    // wahi version dobara aaya to kuch mat karo (apne save ka echo — typing ke
+    // beech faltu re-render se bachne ke liye)
+    if(DBS[co] && window.LOADED_REV[co]===d.rev && window.LOADED_APPLIED_WID[co]===(d.wid||null)){
       if(co===CO && !fromCache){ window.SERVER_SEEN[co]=true; setAppReady(true); onFirstServerLoad(); }
       return;
     }
-    var pre=base+'__r'+d.rev+'__', gets=[];
+    var pre = isV3 ? (base+'__w'+d.wid+'__') : (base+'__r'+d.rev+'__');
+    var tag = isV3 ? ('wid '+d.wid) : ('rev '+d.rev);
+    var gets=[];
     for(var i=0;i<d.nchunks;i++) (function(ix){
       gets.push(fbDB.collection('db').doc(pre+ix).get().then(function(sn){
-        if(!sn.exists) throw new Error('chunk '+ix+' missing (rev '+d.rev+')');
+        if(!sn.exists) throw new Error('chunk '+ix+' missing ('+tag+')');
         return sn.data().chunk||'';
       }));
     })(i);
-    Promise.all(gets).then(function(parts){ _applyRemote(co, parts.join(''), fromCache, d.rev); }).catch(fail);
+    Promise.all(gets).then(function(parts){
+      window.LOADED_APPLIED_WID[co]=(d.wid||null);
+      _applyRemote(co, parts.join(''), fromCache, d.rev);
+    }).catch(fail);
   } else if(d.chunked && d.nchunks){             // ── purana v1 format (backward compat)
     var n=d.nchunks, pieces=new Array(n), need=[];
     pieces[0]=d.chunk||'';
@@ -595,25 +610,28 @@ function fbCloudSave(){
 
   var expect=window.LOADED_REV[co];
   var newRev=((typeof expect==='number')?expect:0)+1;
-  var pre=base+'__r'+newRev+'__';
+  // ⚠ AHEM: naam rev se NAHI banta. Do device ek hi rev number nikaal sakte hain
+  // (dono ne 139 load kiya -> dono 140 sochenge) aur ek dusre ke chunks upar likh
+  // dete the. Isliye har save ka apna UNIQUE wid.
+  var myWid=newWid();
+  var pre=base+'__w'+myWid+'__';
 
   // ── kaun rakhna hai, kaun hatana hai ──
-  // meta me poori list rehti hai, isliye koi rev kabhi anaath nahi hota.
-  var liveRevs=(window.LOADED_REVS[co]||[]).filter(function(r){return typeof r==='number';});
-  if(liveRevs.indexOf(newRev)<0) liveRevs.push(newRev);
-  liveRevs.sort(function(a,b){return a-b;});
-  var keepRevs=liveRevs.slice(-3);                       // aakhri 3 zinda rahenge
-  var dropRevs=liveRevs.slice(0,-3);                     // baaki hatao
-  // purane anaath rev (jo kisi list me hain hi nahi) — thode-thode karke saaf karo
+  // meta me zinda versions ki poori list rehti hai, isliye koi anaath nahi rehta.
+  var live=(window.LOADED_LIVE[co]||[]).filter(function(x){ return x && x.w; });
+  live.push({ r:newRev, w:myWid });
+  var keepLive=live.slice(-3);                           // aakhri 3 zinda rahenge
+  var dropLive=live.slice(0,-3);                         // baaki hatao
+  // purane __r<n>__ documents (v2 wale) — thode-thode karke saaf karo
   var purgedUpTo=window.LOADED_PURGED[co]||0;
-  var purgeTo=Math.min(purgedUpTo+20, newRev-3);         // ek baar me max 20 rev
+  var purgeTo=Math.min(purgedUpTo+20, newRev-1);         // ek baar me max 20
   var purgeList=[];
-  for(var pr=purgedUpTo+1; pr<=purgeTo; pr++) if(keepRevs.indexOf(pr)<0) purgeList.push(pr);
+  for(var pr=purgedUpTo+1; pr<=purgeTo; pr++) purgeList.push(pr);
   var newPurged=(purgeTo>purgedUpTo)?purgeTo:purgedUpTo;
 
-  // 1) chunks NAYE naam se likho — koi purana reader affect nahi hota
+  // 1) chunks apne UNIQUE naam se likho — kisi aur ke chunks kabhi nahi chhedenge
   var writes=parts.map(function(p,ix){
-    return fbDB.collection('db').doc(pre+ix).set({ chunk:p, part:ix, rev:newRev });
+    return fbDB.collection('db').doc(pre+ix).set({ chunk:p, part:ix, rev:newRev, wid:myWid });
   });
 
   Promise.all(writes).then(function(){
@@ -622,30 +640,35 @@ function fbCloudSave(){
       var ref=fbDB.collection('db').doc(base);
       return tx.get(ref).then(function(sn){
         var cur=sn.exists?sn.data():null;
-        var curRev=(cur && cur.v===2)?(cur.rev||0):null;
+        var curRev=(cur && (cur.v===2||cur.v===3))?(cur.rev||0):null;
         // curRev===null => server abhi purane v1 pe hai => pehli migration, allow.
         // warna server ka rev humare load kiye rev se match hona CHAHIYE.
         // (expect undefined + curRev number = humne v1 load kiya par koi aur migrate kar chuka => stale)
         if(curRev!==null && curRev!==expect){
           var er=new Error('conflict'); er.__conflict=true; er.serverRev=curRev; er.myRev=expect; throw er;
         }
-        tx.set(ref, { v:2, rev:newRev, nchunks:parts.length, chunked:true,
-          revs:keepRevs, purgedUpTo:newPurged,
+        tx.set(ref, { v:3, rev:newRev, wid:myWid, nchunks:parts.length, chunked:true,
+          live:keepLive, purgedUpTo:newPurged,
           lastUpdatedBy:window.FB_USER.email,
           lastUpdatedAt:firebase.firestore.FieldValue.serverTimestamp() });
       });
     });
   }).then(function(){
     window.LOADED_REV[co]=newRev;
-    window.LOADED_REVS[co]=keepRevs.slice();
+    window.LOADED_LIVE[co]=keepLive.slice();
+    window.LOADED_WID[co]=myWid;
+    window.LOADED_APPLIED_WID[co]=myWid;
     window.LOADED_PURGED[co]=newPurged;
     fbShowSyncBadge('✅ Saved (v'+newRev+')','rgba(26,107,60,.9)');
     // meta commit ho chuka — ab purane chunks hatana surakshit hai
-    dropRevs.concat(purgeList).forEach(function(r){ _fbDeleteRev(base,r,parts.length); });
+    dropLive.forEach(function(x){ _fbDeleteWid(base,x.w,parts.length); });
+    purgeList.forEach(function(r){ _fbDeleteRev(base,r,parts.length); });
   }).catch(function(err){
     if(err && err.__conflict){
       emergencyBackup('conflict');
-      _fbDeleteRev(base,newRev,parts.length);      // apne likhe orphan chunks hatao
+      // sirf APNE wid ke chunks hatao — ye pakka sirf humne likhe hain,
+      // isliye kisi aur ke zinda chunks kabhi delete nahi honge
+      _fbDeleteWid(base,myWid,parts.length);
       fbShowSyncBadge('⚠ Conflict — save nahi hua','rgba(185,28,28,.9)');
       showSyncError('⚠ Kisi aur ne abhi data badla',
         'Tumhari entry <b>cloud pe save NAHI hui</b> — kisi doosre device ne beech me data update kar diya.<br><br>'+
@@ -668,8 +691,14 @@ function fbCloudSave(){
   });
 }
 
-// ek rev ke saare chunks hatao.
 // (na-maujood doc delete karna no-op hai, isliye pehle get karne ki zaroorat nahi)
+// ek wid ke saare chunks hatao — naya format
+function _fbDeleteWid(base, wid, n){
+  if(!wid) return;
+  var upto=Math.max(n||0, 6);
+  for(var i=0;i<upto;i++) fbDB.collection('db').doc(base+'__w'+wid+'__'+i).delete().catch(function(){});
+}
+// ek rev ke saare chunks hatao — purana v2 format ka kachra saaf karne ke liye
 function _fbDeleteRev(base, rev, n){
   var upto=Math.max(n||0, 6);          // 6 tak — data badhne pe bhi peeche na chhoote
   for(var i=0;i<upto;i++) fbDB.collection('db').doc(base+'__r'+rev+'__'+i).delete().catch(function(){});
