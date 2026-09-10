@@ -4226,6 +4226,8 @@ function openManualSticker(){
   editCtx={type:'manualsticker'};
   openModal('🏷 Manual Sticker — khud daalo aur print karo');
   document.getElementById('modal-body').innerHTML=
+    '<div style="text-align:center;font-size:22px;font-weight:bold;letter-spacing:2px;color:#222;'+
+      'padding:4px 0 10px;border-bottom:2px solid #222;margin-bottom:14px;">BRIGHT PAPER</div>'+
     '<div class="form-grid-2">'+
       fldSel('Item / Quality','ms-item',DB.products,'')+
       fld('PO No.','text','ms-po','')+
@@ -4289,7 +4291,8 @@ function printManualSticker(){
   if(gpb<=0){ showToast('Gross/Bundle daalo',true); return; }
   var bun=msBundles(tg,gpb);
   if(!bun.length){ showToast('Sticker nahi bana',true); return; }
-  var info={ item:item, party:party, po:po, size:size, gsm:gsm, reel:'', wtGross:wtGross, spg:spg, manual:true };
+  var info={ item:item, party:party, po:po, size:size, gsm:gsm, reel:'', wtGross:wtGross, spg:spg, manual:true,
+             heading:'BRIGHT PAPER' };   // sticker ke upar center me chhapega
   var blocks=bun.map(function(x){
     return stickerHTML(info, 'BUNDLE', x.n, x.total, x.gross, round(x.gross*wtGross,2), round(x.gross*spg,0));
   });
@@ -4300,6 +4303,8 @@ function printManualSticker(){
     'body{margin:0;font-family:Arial,sans-serif;}'+
     '.stk{width:4in;height:6in;padding:0.3in 0.28in;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
     '.stk:last-child{page-break-after:auto;}'+
+    '.brand{text-align:center;font-size:22pt;font-weight:bold;letter-spacing:3px;'+
+      'border-bottom:3px solid #000;padding-bottom:6px;margin-bottom:10px;}'+
     '.tag{font-size:16pt;font-weight:bold;letter-spacing:2px;border:2px solid #000;display:inline-block;padding:2px 12px;}'+
     '.item{font-size:30pt;font-weight:bold;line-height:1.08;margin:14px 0 6px;}'+
     '.row{display:flex;justify-content:space-between;font-size:17pt;padding:7px 0;border-bottom:1px solid #999;}'+
@@ -4407,6 +4412,7 @@ function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
   var totalSheet = (sheetOverride!==undefined && sheetOverride!==null) ? sheetOverride : round(grossQty*(parseFloat(info.spg)||0),0);
   return '<div class="stk">'+
     '<div>'+
+      (info.heading ? '<div class="brand">'+H(info.heading)+'</div>' : '')+
       '<div style="display:flex;justify-content:space-between;align-items:center;">'+
         '<span class="tag">'+kind+'</span>'+
         '<span style="font-size:15pt;font-weight:bold;">'+num+' / '+total+'</span>'+
