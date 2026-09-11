@@ -939,7 +939,7 @@ function _fbDeleteRev(base, rev, n){
       </div>
     </div>
     <div class="tbl-wrap freeze-wrap"><table class="autofilter cr-freeze" style="font-size:11px;"><thead><tr id="cr-head">
-      <th class="crfz crfz1">PO No.</th><th class="crfz crfz2">PO Date</th><th class="crfz crfz3">Party Name</th><th style="color:#0e7490;">Quality (Manual)</th><th>Reel Size</th><th class="num">GSM</th><th>Quality</th>
+      <th class="crfz crfz1">PO No.</th><th class="crfz crfz2">PO Date</th><th class="crfz crfz3">Party Name</th><th style="color:#0e7490;">Quality (Manual)</th><th style="color:#0e7490;">Remark</th><th>Reel Size</th><th class="num">GSM</th><th>Quality</th>
       <th>Sheet Size</th><th class="num">No. of Sheet</th><th class="num">Qty</th>
       <th>PO→Planning</th><th>Material Ready</th><th class="num">Finished Sheet</th><th>Deliver Area</th>
       <th>Planning Del. Date</th><th>Cutting Date</th><th class="num">Cutting Qty</th><th>Packing Date</th><th class="num">Packing Qty</th><th class="num">No. of Packets</th><th>Delivered Date</th>
@@ -5325,7 +5325,9 @@ function renderCuttingRegister(){
   // manual fields per-line: key = orderId|lineIdx
   var chk=function(k,key,on){ return '<input type="checkbox" '+(on?'checked':'')+' onchange="crSet(\''+k+'\',\''+key+'\',this.checked)" style="cursor:pointer;transform:scale(1.2);"/>'; };
   var dfld=function(k,key,val){ return '<input type="date" value="'+H(toDateInput(val))+'" onkeydown="if(event.key!==\'Tab\')return false;" onmousedown="try{this.showPicker&&this.showPicker()}catch(e){}" onchange="crSet(\''+k+'\',\''+key+'\',this.value)" style="width:120px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;"/>'; }
-  var tfld=function(k,key,val,w){ return '<input type="text" value="'+H(val||'')+'" onchange="crSet(\''+k+'\',\''+key+'\',this.value)" placeholder="-" style="width:'+(w||90)+'px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;"/>'; }
+  // NOTE: H() quote escape nahi karta — value attribute ke liye "&quot;" zaroori hai,
+  // warna 5" jaisa remark likhne pe row toot jati thi
+  var tfld=function(k,key,val,w){ return '<input type="text" value="'+H(val||'').replace(/"/g,'&quot;')+'" onchange="crSet(\''+k+'\',\''+key+'\',this.value)" placeholder="-" style="width:'+(w||90)+'px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;"/>'; }
   list.forEach(function(o){
     var lines=getLines(o); if(!lines.length) lines=[{}];
     var hay=((o.poNo||'')+' '+(o.party||'')+' '+(o.item||'')).toLowerCase();
@@ -5355,6 +5357,7 @@ function renderCuttingRegister(){
         '<td class="crfz crfz2"'+(li>0?' style="background:#fafafa;"':'')+'>'+(li===0?fmtDate(o.poDate):'')+'</td>'+
         '<td class="crfz crfz3"'+(li>0?' style="background:#fafafa;"':'')+'>'+(li===0?H(o.party||'-'):'')+'</td>'+
         '<td>'+tfld(k,'quality',ex.quality,100)+'</td>'+           // MANUAL quality
+        '<td>'+tfld(k,'remark',ex.remark,150)+'</td>'+             // MANUAL remark
         '<td>'+reelSize+'</td>'+
         '<td class="num">'+H(gsm||'-')+'</td>'+
         '<td>'+H(o.item||'-')+'</td>'+                             // auto quality (order item)
@@ -5376,7 +5379,7 @@ function renderCuttingRegister(){
       '</tr>';
     });
   });
-  body.innerHTML=html||'<tr><td colspan="22" style="text-align:center;padding:20px;color:#999;">Koi PO nahi. Production Order banao.</td></tr>';
+  body.innerHTML=html||'<tr><td colspan="23" style="text-align:center;padding:20px;color:#999;">Koi PO nahi. Production Order banao.</td></tr>';
   var cc=document.getElementById('cr-count'); if(cc) cc.textContent=cnt+' PO';
   setTimeout(function(){ if(window.attachTableFilters) attachTableFilters(); }, 20);
 }
