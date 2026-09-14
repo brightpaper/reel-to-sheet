@@ -2027,7 +2027,7 @@ function renderInv(){
       '<td class="num" style="color:#1a6b3c;font-weight:bold;">'+N(bal)+'</td>'+
       '<td style="color:#7c3aed;">'+H(r.loc)+'</td><td><span class="badge '+stb+'">'+status+'</span></td>'+
       '<td class="no-print"><button class="btn btn-edit btn-sm" onclick="openPurchase(\''+r.id+'\')">✎</button> '+
-      (bal>0.01?'<button class="btn btn-sm" onclick="openReelSale(\''+H(r.rno)+'\')" title="Ye reel direct bech do (bina cutting)" style="background:#fef3c7;color:#92400e;">🎞 Sale</button> ':'')+
+      (bal>0.01?'<button class="btn btn-sm" onclick="openReelSale(\''+H(r.id)+'\')" title="Ye reel direct bech do (bina cutting)" style="background:#fef3c7;color:#92400e;">🎞 Sale</button> ':'')+
       '<button class="btn btn-del btn-sm" onclick="delReel(\''+r.id+'\')">🗑</button></td></tr>';
   });
   body.innerHTML=html||'<tr><td colspan="17" style="text-align:center;padding:20px;color:#999;">Koi reel inventory me nahi. Purchase tab se reel add karo.</td></tr>';
@@ -2460,11 +2460,17 @@ function openReelSale(preReel){
   editCtx={type:'reelsale'};
   openModal('🎞 Direct Reel Sale', true);
   var partyOpts='<option value="">-- party --</option>'+(DB.parties||[]).map(function(p){return '<option>'+H(p)+'</option>';}).join('');
-  var reelOpts=(DB.reels||[]).filter(function(r){ return reelBalanceOf(r.rno)>0; })
+  // ⚠ Ek hi reel no. ki kai reels ho sakti hain (alag width/GSM) — 249 aise number hain.
+  // Isliye pehchan r.id se hoti hai, r.rno se NAHI. Pehle rno se dhoondte the, to
+  // find() hamesha PEHLI reel deta tha — aur agar wo khatam ho chuki hoti, to us
+  // number ki saari reels dropdown se gayab ho jati thi.
+  var reelOpts=(DB.reels||[]).filter(function(r){ return reelBalanceOf(r.rno, r)>0; })
     .map(function(r){
       var used=reelUsedInOrders(r.rno);
       var tag=used>0?' (cut ho chuki, bacha)':'';
-      return '<option value="'+H(r.rno)+'">'+H(r.rno)+' — '+N(reelBalanceOf(r.rno))+' kg'+tag+'</option>';
+      var det=(r.w!==undefined&&r.w!=='')?(' | '+H(r.w)+' '+unitFull(r.wunit)):'';
+      det+=(r.gsm!==undefined&&r.gsm!=='')?(' | '+H(r.gsm)+' GSM'):'';
+      return '<option value="'+H(r.id)+'">'+H(r.rno)+det+' — '+N(reelBalanceOf(r.rno, r))+' kg'+tag+'</option>';
     }).join('');
   document.getElementById('modal-body').innerHTML=
     '<div class="form-grid-2">'+
@@ -2483,13 +2489,13 @@ function openReelSale(preReel){
   }
 }
 function onReelSalePick(){
-  var rno=G('m-rsreel');
+  var rid=G('m-rsreel');                 // ab ye reel ki ID hai, reel number nahi
   var box=document.getElementById('rs-info'); if(!box) return;
-  if(!rno){ box.innerHTML='Reel chuno — uska detail aur balance yahan dikhega.'; return; }
-  var r=DB.reels.find(function(x){return String(x.rno)===String(rno);});
+  if(!rid){ box.innerHTML='Reel chuno — uska detail aur balance yahan dikhega.'; return; }
+  var r=DB.reels.find(function(x){return String(x.id)===String(rid);});
   if(!r){ box.innerHTML='Reel nahi mili.'; return; }
-  var bal=reelBalanceOf(rno);
-  box.innerHTML='<b>'+H(r.product||'-')+'</b> | Tone: '+H(r.tone||'-')+' | Width: '+H(r.w||'-')+' '+H(r.wunit||'')+
+  var bal=reelBalanceOf(r.rno, r);
+  box.innerHTML='Reel No: <b>'+H(r.rno)+'</b> | <b>'+H(r.product||'-')+'</b> | Tone: '+H(r.tone||'-')+' | Width: '+H(r.w||'-')+' '+H(r.wunit||'')+
     ' | GSM: '+H(r.gsm||'-')+' | Location: '+H(r.loc||'-')+
     '<br>Original: <b>'+N(parseFloat(r.wt)||0)+' kg</b> | <b style="color:#166534;">Balance: '+N(bal)+' kg</b>';
   var q=document.getElementById('m-rsqty'); if(q && !q.value) q.value=bal;
@@ -4044,13 +4050,15 @@ function saveModal(){
       saleOrder:sorder, sheets:num('m-ssheets'), qty:sqty, rate:num('m-srate'), remark:G('m-srem').trim() });
     dbSave(true); renderSales(); showToast('✓ Sale saved'); closeModal(); return;
   } else if(t==='reelsale'){
-    var rsReel=G('m-rsreel'), rsQty=num('m-rsqty'), rsParty=G('m-rsparty');
-    if(!rsReel){ showToast('Reel select karo',true); return; }
+    var rsReelId=G('m-rsreel'), rsQty=num('m-rsqty'), rsParty=G('m-rsparty');
+    if(!rsReelId){ showToast('Reel select karo',true); return; }
     if(!rsQty || rsQty<=0){ showToast('Qty daalo',true); return; }
     if(!rsParty){ showToast('Party select karo',true); return; }
-    var rr=DB.reels.find(function(x){return String(x.rno)===String(rsReel);});
+    // ID se dhoondo — rno se dhoondte to duplicate number wali galat reel mil jati
+    var rr=DB.reels.find(function(x){return String(x.id)===String(rsReelId);});
     if(!rr){ showToast('Reel nahi mili',true); return; }
-    var bal=reelBalanceOf(rsReel);
+    var rsReel=rr.rno;
+    var bal=reelBalanceOf(rr.rno, rr);
     if(rsQty>bal){
       if(!confirm('Qty ('+N(rsQty)+' kg) balance ('+N(bal)+' kg) se zyada hai. Phir bhi save karein?')) return;
     }
