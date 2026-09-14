@@ -402,6 +402,8 @@ window.LOADED_WID  = {};    // co -> abhi chal rahe version ka wid
 window.LOADED_APPLIED_WID = {};  // co -> jo wid humne last apply kiya
 window.LOADED_PURGED = {};  // co -> purane __r<n>__ documents ki safai kahan tak hui
 window.SERVER_SEEN = {};    // co -> server se (cache se nahi) data aa chuka?
+window.BASE_STR = {};       // co -> cloud se jo data aaya tha (edit se PEHLE ka) — merge ke liye
+window._mergeTry = 0;       // ek save ke liye kitni baar merge try kiya
 
 // har save ka apna unique naam — do device kabhi ek hi document pe nahi likhenge
 function newWid(){
@@ -571,6 +573,9 @@ function _applyRemote(co, payloadStr, fromCache, rev){
   if(bad) console.warn('[RMS] '+bad+' adhoori reel/purchase entries (rno ya weight khali). DELETE nahi ki gayi.');
 
   DBS[co]=db;
+  // BASE = cloud se aaya data, edit se pehle ka. Conflict pe isse compare karke
+  // pata chalta hai ki "maine kya joda/badla/hataya".
+  window.BASE_STR[co]=JSON.stringify(db);
   if(rev!=null) window.LOADED_REV[co]=rev;
   if(!fromCache) window.SERVER_SEEN[co]=true;
 
@@ -604,6 +609,9 @@ function fbCloudSave(){
 
   var co=CO, base=SHEET_DOCS[co];
   var payload=JSON.stringify(DBS[co]);
+  // save ke waqt ka BASE pakad lo — conflict tak DBS badal sakta hai,
+  // isliye merge me yahi jodi (base, payload) use hogi
+  var myBaseStr=window.BASE_STR[co];
   var CHUNK=700000, parts=[];
   for(var i=0;i<payload.length;i+=CHUNK) parts.push(payload.slice(i,i+CHUNK));
   if(!parts.length) parts=[''];
@@ -659,23 +667,36 @@ function fbCloudSave(){
     window.LOADED_WID[co]=myWid;
     window.LOADED_APPLIED_WID[co]=myWid;
     window.LOADED_PURGED[co]=newPurged;
+    window.BASE_STR[co]=payload;        // ab cloud pe yahi hai -> agla BASE yahi
+    window._mergeTry=0;
     fbShowSyncBadge('✅ Saved (v'+newRev+')','rgba(26,107,60,.9)');
     // meta commit ho chuka — ab purane chunks hatana surakshit hai
     dropLive.forEach(function(x){ _fbDeleteWid(base,x.w,parts.length); });
     purgeList.forEach(function(r){ _fbDeleteRev(base,r,parts.length); });
   }).catch(function(err){
     if(err && err.__conflict){
-      emergencyBackup('conflict');
       // sirf APNE wid ke chunks hatao — ye pakka sirf humne likhe hain,
       // isliye kisi aur ke zinda chunks kabhi delete nahi honge
       _fbDeleteWid(base,myWid,parts.length);
-      fbShowSyncBadge('⚠ Conflict — save nahi hua','rgba(185,28,28,.9)');
-      showSyncError('⚠ Kisi aur ne abhi data badla',
-        'Tumhari entry <b>cloud pe save NAHI hui</b> — kisi doosre device ne beech me data update kar diya.<br><br>'+
-        '✅ Tumhara poora data <b>emergency backup file</b> me download ho gaya hai (Downloads folder dekho) — kuch gaya nahi.<br><br>'+
-        'Ab page refresh karo aur ye entry dobara daalo.',
-        [{label:'🔄 Refresh',fn:'location.reload()'},
-         {label:'💾 Backup dobara',bg:'#1a6b3c',fn:"emergencyBackup('conflict')"}]);
+      // ── pehle KHUD jodne ki koshish karo (auto-merge) ──
+      fbShowSyncBadge('🔀 Dono ka data jod raha hoon...','rgba(146,64,14,.95)');
+      var tryNo=window._mergeTry||0;
+      window._mergeTry=tryNo+1;
+      return _autoMerge(co, myBaseStr, payload, tryNo).then(function(){
+        window._saveAgain=true;         // jud gaya — ab dobara save hoga (neeche wala .then karega)
+      }).catch(function(me){
+        console.error('[RMS] auto-merge fail:', me);
+        window._mergeTry=0;
+        emergencyBackup('conflict');
+        fbShowSyncBadge('⚠ Conflict — save nahi hua','rgba(185,28,28,.9)');
+        showSyncError('⚠ Kisi aur ne abhi data badla',
+          'Tumhari entry <b>cloud pe save NAHI hui</b> — kisi doosre device ne beech me data update kar diya, '+
+          'aur dono ka data apne aap jodne ki koshish bhi kaam nahi aayi.<br><br>'+
+          '✅ Tumhara poora data <b>emergency backup file</b> me download ho gaya hai (Downloads folder dekho) — kuch gaya nahi.<br><br>'+
+          'Ab page refresh karo aur ye entry dobara daalo.',
+          [{label:'🔄 Refresh',fn:'location.reload()'},
+           {label:'💾 Backup dobara',bg:'#1a6b3c',fn:"emergencyBackup('conflict')"}]);
+      });
     } else {
       fbShowSyncBadge('⚠ Save fail','rgba(185,28,28,.9)');
       showSyncError('⚠ Save FAIL ho gaya',
@@ -691,6 +712,184 @@ function fbCloudSave(){
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// AUTO-MERGE  — conflict pe dono ka kaam bacha lo
+//
+//   BASE   = jo data humne cloud se load kiya tha (edit se pehle)
+//   MINE   = jo humne save karne ki koshish ki (BASE + mera change)
+//   SERVER = ab cloud pe jo hai (BASE + kisi aur ka change)
+//
+//   MERGED = SERVER + (MINE - BASE)      -> dono ka kaam saath
+//
+// Har record apni id se pehchana jata hai, isliye "maine kya joda / badla /
+// hataya" theek se nikal aata hai. Save se PEHLE ginti check hoti hai —
+// agar kuch bhi gum raha ho to merge cancel, purana surakshit modal.
+// ═══════════════════════════════════════════════════════════════════
+
+// record ki pehchan — id ho to id, warna poora record hi pehchan
+function _recKey(r){
+  if(r && typeof r==='object'){
+    if(r.id!==undefined && r.id!==null && r.id!=='') return 'id:'+r.id;
+    return 'j:'+JSON.stringify(r);
+  }
+  return 'v:'+String(r);
+}
+function _byKey(arr){
+  var m={}; (arr||[]).forEach(function(r){ m[_recKey(r)]=r; }); return m;
+}
+function _same(a,b){ return JSON.stringify(a)===JSON.stringify(b); }
+
+// ─── array (reels, purchases, orders, parties…) ───
+function _mergeArray(base, mine, server, name, notes){
+  var b=_byKey(base), m=_byKey(mine), s=_byKey(server);
+  var iRemoved={}, iChanged={}, iAdded=[];
+  Object.keys(b).forEach(function(k){ if(!m[k]) iRemoved[k]=1; });
+  Object.keys(m).forEach(function(k){
+    if(!b[k]) iAdded.push(k);
+    else if(!_same(m[k], b[k])) iChanged[k]=1;
+  });
+
+  var out=[], seen={};
+  // server ka kram banaye rakho
+  (server||[]).forEach(function(r){
+    var k=_recKey(r);
+    if(iRemoved[k]) return;                       // maine delete kiya tha
+    seen[k]=1;
+    if(iChanged[k]){
+      // dono ne same record badla? -> mera chalega, par bata do
+      if(b[k] && !_same(r, b[k])) notes.push(name+': ek record dono ne badla — tumhara rakha gaya');
+      out.push(m[k]);
+    } else out.push(r);
+  });
+  // mere naye records
+  iAdded.forEach(function(k){ if(!seen[k]){ out.push(m[k]); seen[k]=1; } });
+  // maine badla par doosre ne delete kar diya -> mera wapas laao (surakshit taraf)
+  Object.keys(iChanged).forEach(function(k){
+    if(!seen[k]){ out.push(m[k]); seen[k]=1; notes.push(name+': jo record tumne badla wo doosre ne delete kiya tha — wapas rakha gaya'); }
+  });
+  return out;
+}
+
+// ─── map (cutReg, cutRates) ───
+function _mergeMap(base, mine, server, name, notes){
+  var out={};
+  Object.keys(server||{}).forEach(function(k){ out[k]=server[k]; });
+  Object.keys(base||{}).forEach(function(k){ if(!(k in (mine||{}))) delete out[k]; });   // maine hataya
+  Object.keys(mine||{}).forEach(function(k){
+    var had=(k in (base||{}));
+    if(had && _same(mine[k], base[k])) return;              // maine chhua hi nahi
+    var sv=out[k];
+    if(sv && typeof sv==='object' && !Array.isArray(sv) && mine[k] && typeof mine[k]==='object' && !Array.isArray(mine[k])){
+      // cutReg jaisa nested — sirf wahi field badlo jo maine badli
+      var mm={}; Object.keys(sv).forEach(function(f){ mm[f]=sv[f]; });
+      Object.keys(mine[k]).forEach(function(f){
+        var bf=(had && base[k]) ? base[k][f] : undefined;
+        if(!_same(mine[k][f], bf)) mm[f]=mine[k][f];
+      });
+      out[k]=mm;
+    } else out[k]=mine[k];
+  });
+  return out;
+}
+
+// ─── poora DB ───
+function _mergeDB(base, mine, server){
+  var notes=[], out={};
+  var keys={};
+  [base, mine, server].forEach(function(o){ Object.keys(o||{}).forEach(function(k){ keys[k]=1; }); });
+  Object.keys(keys).forEach(function(k){
+    var b=(base||{})[k], m=(mine||{})[k], s=(server||{})[k];
+    if(Array.isArray(m) || Array.isArray(s)){
+      out[k]=_mergeArray(b||[], m||[], s||[], k, notes);
+    } else if((m && typeof m==='object') || (s && typeof s==='object')){
+      out[k]=_mergeMap(b||{}, m||{}, s||{}, k, notes);
+    } else {
+      out[k]=(m!==undefined)?m:s;
+    }
+  });
+  return { data:out, notes:notes };
+}
+
+// ─── SURAKSHA: merge ke baad kuch gum to nahi hua? ───
+function _mergeCheck(base, mine, server, merged){
+  var bad=[];
+  Object.keys(merged).forEach(function(k){
+    if(!Array.isArray(merged[k])) return;
+    var b=_byKey((base||{})[k]||[]), m=_byKey((mine||{})[k]||[]),
+        s=_byKey((server||{})[k]||[]), g=_byKey(merged[k]);
+    // server ka har record jo maine delete NAHI kiya, merged me hona chahiye
+    Object.keys(s).forEach(function(key){
+      var iDeleted = b[key] && !m[key];
+      if(!iDeleted && !g[key]) bad.push(k+': cloud ka record gayab');
+    });
+    // mera har record jo doosre ne delete NAHI kiya, merged me hona chahiye
+    Object.keys(m).forEach(function(key){
+      var otherDeleted = b[key] && !s[key];
+      if(!otherDeleted && !g[key]) bad.push(k+': tumhara record gayab');
+    });
+  });
+  return bad;
+}
+
+// ─── cloud ka abhi ka data laao (apply kiye bina) ───
+function _fetchRemote(co){
+  var base=SHEET_DOCS[co];
+  return fbDB.collection('db').doc(base).get().then(function(sn){
+    if(!sn.exists) throw new Error('cloud doc nahi mila');
+    var d=sn.data();
+    var pre, n=d.nchunks||1;
+    if(d.v===3 && d.wid) pre=base+'__w'+d.wid+'__';
+    else if(d.v===2)     pre=base+'__r'+d.rev+'__';
+    else                 pre=null;
+    if(!pre){                                    // purana v1
+      var pieces=[d.chunk||''], need=[];
+      for(var p=1;p<n;p++) (function(ix){
+        need.push(fbDB.collection('db').doc(base+'__'+ix).get().then(function(x){ pieces[ix]=(x.exists&&x.data().chunk)||''; }));
+      })(p);
+      return Promise.all(need).then(function(){ return { data:JSON.parse(pieces.join('')), meta:d }; });
+    }
+    var gets=[];
+    for(var i=0;i<n;i++) (function(ix){
+      gets.push(fbDB.collection('db').doc(pre+ix).get().then(function(x){
+        if(!x.exists) throw new Error('chunk '+ix+' missing');
+        return x.data().chunk||'';
+      }));
+    })(i);
+    return Promise.all(gets).then(function(parts){ return { data:JSON.parse(parts.join('')), meta:d }; });
+  });
+}
+
+// ─── conflict pe: jodo aur dobara save karo ───
+// myPayload = jo hum save karne gaye the (DBS baad me badal sakta hai, isliye
+//             wahi string use karo jo save ke waqt bani thi)
+function _autoMerge(co, myBaseStr, myPayload, attempt){
+  attempt=attempt||0;
+  if(attempt>=2) return Promise.reject(new Error('merge attempts khatam'));
+  if(!myBaseStr) return Promise.reject(new Error('base nahi hai'));
+  return _fetchRemote(co).then(function(srv){
+    var base, mine;
+    try { base=JSON.parse(myBaseStr); mine=JSON.parse(myPayload); }
+    catch(e){ throw new Error('base/mine parse fail'); }
+    var res=_mergeDB(base, mine, srv.data);
+    var bad=_mergeCheck(base, mine, srv.data, res.data);
+    if(bad.length){ console.error('[RMS] merge check fail:', bad); throw new Error('merge check fail'); }
+
+    // merged ko memory me lao, aur naya BASE = cloud ka data
+    DBS[co]=res.data;
+    window.BASE_STR[co]=JSON.stringify(srv.data);
+    window.LOADED_REV[co]=(srv.meta && srv.meta.rev)||0;
+    window.LOADED_LIVE[co]=(srv.meta && Array.isArray(srv.meta.live))?srv.meta.live.slice():[];
+    window.LOADED_PURGED[co]=(srv.meta && typeof srv.meta.purgedUpTo==='number')?srv.meta.purgedUpTo:0;
+    window.LOADED_WID[co]=(srv.meta && srv.meta.wid)||null;
+    window.LOADED_APPLIED_WID[co]=window.LOADED_WID[co];
+    if(co===CO){ DB=DBS[co]; if(window.renderAll) try{ renderAll(); }catch(e){ console.warn(e); } }
+    if(res.notes.length){
+      console.warn('[RMS] merge notes:', res.notes);
+      showToast('🔀 Dono ka data jod diya — ' + res.notes[0], true);
+    }
+    return res.notes;
+  });
+}
 // (na-maujood doc delete karna no-op hai, isliye pehle get karne ki zaroorat nahi)
 // ek wid ke saare chunks hatao — naya format
 function _fbDeleteWid(base, wid, n){
