@@ -1791,7 +1791,12 @@ function calcLine(L){
   var otherWt     = q(L.otherSheet);
   var reelCutQty = round(actQty + (parseFloat(L.wastageBeforeCut)||0) + (parseFloat(L.corePipe)||0) + (parseFloat(L.diffQty)||0), 2);
   var diffSheet   = round((L.actSheet||0) - (L.finishedSheet||0) - (L.finishSheet||0) - (L.retrySheet||0) - (L.wastageSheet||0) - (L.otherSheet||0), 0);
-  var diffWt      = round(actQty - finishedQty - finishWt - retryWt - wastageWt - otherWt, 3);
+  // ⚠ Diff Qty bina round kiye nikaalo. Pehle har component (finished/fresh/retry/
+  // wastage) alag-alag 2 decimal pe round hota tha; chaaron upar round ho jayein to
+  // ~0.02 kg ka jhootha farak ban jata tha aur save block ho jata tha — jabki sheets
+  // bilkul barabar hote the. Sheets barabar => weight barabar, isliye exact compare.
+  var qx          = function(sheet){ return grossOf(sheet) * wtGross; };
+  var diffWt      = round(qx(L.actSheet) - qx(L.finishedSheet) - qx(L.finishSheet) - qx(L.retrySheet) - qx(L.wastageSheet) - qx(L.otherSheet), 3);
   // GSM Variation: Finished Qty (gross method) − (4-decimal WT/Sheet at Var.GSM × finished sheets)
   var _vgsm = parseFloat(L.varGsm)||0;
   var _finSh = parseFloat(L.finishedSheet)||0;
@@ -4145,7 +4150,9 @@ function saveModal(){
         if(!isCut) return;                       // cutting hui hi nahi to chhod do
         var c=calcLine(L);
         var ds=Math.round(c.diffSheet||0), dq=round(c.diffWt||0,2);
-        if(Math.abs(ds)>0.5 || Math.abs(dq)>0.01){
+        // Diff Sheet asli check hai. Diff Qty sheets se hi banti hai, isliye usme
+        // sirf float ka jhol ho sakta hai — 0.05 kg ki chhoot rakhi hai.
+        if(Math.abs(ds)>0.5 || Math.abs(dq)>0.05){
           diffLine=i+1;
           diffMsg='Line '+diffLine+' (Reel '+(L.reelNo||'-')+'): Diff Sheet = '+ds+', Diff Qty = '+N(dq,2)+'. Finished/Wastage sheet sahi bharo taaki Diff 0 ho, tabhi save hoga.';
         }
