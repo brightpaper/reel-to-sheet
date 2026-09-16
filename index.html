@@ -1174,7 +1174,7 @@ function _fbDeleteRev(base, rev, n){
       </div>
     </div>
     <div class="tbl-wrap freeze-wrap"><table class="autofilter cr-freeze" style="font-size:11px;"><thead><tr id="cr-head">
-      <th class="crfz crfz1">PO No.</th><th class="crfz crfz2">PO Date</th><th class="crfz crfz3">Party Name</th><th style="color:#0e7490;">Quality (Manual)</th><th style="color:#0e7490;">Remark</th><th>Reel Size</th><th class="num">GSM</th><th>Quality</th>
+      <th class="crfz crfz1">PO No.</th><th class="crfz crfz2">PO Date</th><th class="crfz crfz3">Party Name</th><th>Reel Size</th><th class="num">GSM</th><th>Quality</th><th style="color:#0e7490;">Quality (Manual)</th><th style="color:#0e7490;">Remark</th>
       <th>Sheet Size</th><th class="num">No. of Sheet</th><th class="num">Qty</th>
       <th>PO→Planning</th><th>Material Ready</th><th class="num">Finished Sheet</th><th>Deliver Area</th>
       <th>Planning Del. Date</th><th>Cutting Date</th><th class="num">Cutting Qty</th><th>Packing Date</th><th class="num">Packing Qty</th><th class="num">No. of Packets</th><th>Delivered Date</th>
@@ -1302,14 +1302,15 @@ function _fbDeleteRev(base, rev, n){
         <th>Product</th><th>Division</th><th>Tone/Shade</th><th>Width (cm)</th><th>GSM</th>
         <th class="num">Weight (kg)</th><th class="col-sep num" style="color:#7c3aed;">Used (kg)</th>
         <th class="num" style="color:#c2410c;">Order Qty (kg)</th>
-        <th class="num" style="color:#1a6b3c;">Balance (kg)</th><th>📍 Location</th><th>Status</th><th class="no-print">Action</th>
+        <th class="num" style="color:#1a6b3c;">Balance (kg)</th><th>📍 Location</th><th>Status</th>
+        <th style="color:#92400e;">Sale Challan No.</th><th class="no-print">Action</th>
       </tr></thead>
       <tbody id="inv-body"></tbody>
       <tfoot><tr style="background:#e6f4ec;font-weight:bold;border-top:2px solid #1a6b3c;font-family:monospace;">
         <td colspan="10" style="text-align:right;padding:8px;color:#1a6b3c;">📊 TOTAL:</td>
         <td class="num" id="if-wt">0</td><td class="col-sep num" style="color:#7c3aed;" id="if-used">0</td>
         <td class="num" style="color:#c2410c;" id="if-oq">0</td>
-        <td class="num" style="color:#1a6b3c;" id="if-bal">0</td><td colspan="3"></td>
+        <td class="num" style="color:#1a6b3c;" id="if-bal">0</td><td colspan="4"></td>
       </tr></tfoot></table>
     </div>
   </div>
@@ -1845,7 +1846,10 @@ function calcLine(L){
   var _wtSheetVar4 = round((_len*_wid*_vgsm)/10000000, 4);            // WT/Sheet at var GSM (4 decimal)
   var _finSheetMethodVar = _wtSheetVar4 * _finSh;                     // WT/Sheet(var,4dec) × finishSheet
   var varWt = (_vgsm>0 && _gsm>0 && _finSh>0) ? round(_finGrossMethod - _finSheetMethodVar, 2) : 0;
-  return { wtSheet:wtSheet, wtGross:wtGross, wtGrossVar:wtGrossVar, orderQty:orderQty, actQty:actQty,
+  // sheet counts bhi wapas bhejo — pehle sirf qty (kg) milti thi, isliye
+  // Cutting Register me "No. of Sheet" undefined -> 0 dikh raha tha
+  return { orderSheet:(parseFloat(L.orderSheet)||0), actSheet:(parseFloat(L.actSheet)||0),
+    wtSheet:wtSheet, wtGross:wtGross, wtGrossVar:wtGrossVar, orderQty:orderQty, actQty:actQty,
     reelCutQty:reelCutQty, finishedGross:finishedGross, finishedQty:finishedQty, finishedQtyVar:finishedQtyVar,
     finishWt:finishWt, retryWt:retryWt, wastageWt:wastageWt, otherWt:otherWt,
     diffSheet:diffSheet, diffWt:diffWt, varWt:varWt };
@@ -1961,7 +1965,7 @@ function reelCutQtyFY(rno, reelObj){
 // ek render ke liye banta hai (stale hone ka sawaal hi nahi).
 // ═══════════════════════════════════════════════════════════════════
 function buildReelIndex(){
-  var used={}, ord={}, cutFY={}, soldFY={}, soldAll={};
+  var used={}, ord={}, cutFY={}, soldFY={}, soldAll={}, chal={};
   var add=function(m,id,v){ m[id]=(m[id]||0)+v; };
 
   (DB.orders||[]).forEach(function(o){
@@ -1992,6 +1996,9 @@ function buildReelIndex(){
       add(used, id, qty);
       add(soldAll, id, qty);
       if(inF) add(soldFY, id, qty);
+      // sale challan no. — ek reel ki kai sale ho sakti hain, sab jama karo
+      var ch=String(s.saleOrder||'').trim();
+      if(ch){ (chal[id]=chal[id]||[]); if(chal[id].indexOf(ch)<0) chal[id].push(ch); }
     });
   });
 
@@ -2001,7 +2008,8 @@ function buildReelIndex(){
     orderQty:   function(r){ return get(ord, r); },
     cutQtyFY:   function(r){ return get(cutFY, r); },
     soldQtyFY:  function(r){ return get(soldFY, r); },
-    soldQtyAll: function(r){ return get(soldAll, r); }
+    soldQtyAll: function(r){ return get(soldAll, r); },
+    challans:   function(r){ return (chal[String(r.id)]||[]).join(', '); }
   };
 }
 function reelUsed(rno, reelObj){
@@ -2322,11 +2330,12 @@ function renderInv(){
       '<td class="num" style="color:#c2410c;">'+(ordQty>0?N(ordQty):'-')+'</td>'+
       '<td class="num" style="color:#1a6b3c;font-weight:bold;">'+N(bal)+'</td>'+
       '<td style="color:#7c3aed;">'+H(r.loc)+'</td><td><span class="badge '+stb+'">'+status+'</span></td>'+
+      '<td style="color:#92400e;font-weight:bold;">'+(H(RIX.challans(r))||'-')+'</td>'+   // Direct Reel Sale ka challan no.
       '<td class="no-print"><button class="btn btn-edit btn-sm" onclick="openPurchase(\''+r.id+'\')">✎</button> '+
       (bal>0.01?'<button class="btn btn-sm" onclick="openReelSale(\''+H(r.id)+'\')" title="Ye reel direct bech do (bina cutting)" style="background:#fef3c7;color:#92400e;">🎞 Sale</button> ':'')+
       '<button class="btn btn-del btn-sm" onclick="delReel(\''+r.id+'\')">🗑</button></td></tr>';
   });
-  body.innerHTML=html||'<tr><td colspan="17" style="text-align:center;padding:20px;color:#999;">Koi reel inventory me nahi. Purchase tab se reel add karo.</td></tr>';
+  body.innerHTML=html||'<tr><td colspan="18" style="text-align:center;padding:20px;color:#999;">Koi reel inventory me nahi. Purchase tab se reel add karo.</td></tr>';
   document.getElementById('if-wt').textContent=N(tw);
   document.getElementById('if-used').textContent=N(tu);
   var _ifoq=document.getElementById('if-oq'); if(_ifoq) _ifoq.textContent=N(toq);
@@ -5667,11 +5676,11 @@ function renderCuttingRegister(){
         '<td class="crfz crfz1"'+(li>0?' style="background:#fafafa;"':'')+'>'+poCell+'</td>'+
         '<td class="crfz crfz2"'+(li>0?' style="background:#fafafa;"':'')+'>'+(li===0?fmtDate(o.poDate):'')+'</td>'+
         '<td class="crfz crfz3"'+(li>0?' style="background:#fafafa;"':'')+'>'+(li===0?H(o.party||'-'):'')+'</td>'+
-        '<td>'+tfld(k,'quality',ex.quality,100)+'</td>'+           // MANUAL quality
-        '<td>'+tfld(k,'remark',ex.remark,150)+'</td>'+             // MANUAL remark
         '<td>'+reelSize+'</td>'+
         '<td class="num">'+H(gsm||'-')+'</td>'+
         '<td>'+H(o.item||'-')+'</td>'+                             // auto quality (order item)
+        '<td>'+tfld(k,'quality',ex.quality,100)+'</td>'+           // MANUAL quality
+        '<td>'+tfld(k,'remark',ex.remark,150)+'</td>'+             // MANUAL remark
         '<td>'+sheetSize+'</td>'+
         '<td class="num">'+N(c.orderSheet,0)+'</td>'+
         '<td class="num">'+N(c.orderQty,0)+'</td>'+
