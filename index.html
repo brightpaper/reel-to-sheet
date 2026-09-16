@@ -678,11 +678,19 @@ function fbCloudSave(){
       // sirf APNE wid ke chunks hatao — ye pakka sirf humne likhe hain,
       // isliye kisi aur ke zinda chunks kabhi delete nahi honge
       _fbDeleteWid(base,myWid,parts.length);
+      // ⛔ AUTO-MERGE ABHI BAND HAI.
+      // Bug: save ke beech me doosre device ka data aa jaye to _applyRemote
+      // BASE_STR naya kar deta tha, par save-success wali line use wapas purane
+      // payload pe set kar deti thi. Phir BASE aur DBS alag ho jate the, aur
+      // agle merge me naye records "user ne delete kiye" samajh ke UD jate the
+      // (PO 1128/1129 isi se gaye). Theek karke, test karke hi wapas chalu karenge.
+      var MERGE_ON=false;
       // ── pehle KHUD jodne ki koshish karo (auto-merge) ──
       fbShowSyncBadge('🔀 Dono ka data jod raha hoon...','rgba(146,64,14,.95)');
       var tryNo=window._mergeTry||0;
       window._mergeTry=tryNo+1;
-      return _autoMerge(co, myBaseStr, payload, tryNo).then(function(){
+      return (MERGE_ON ? _autoMerge(co, myBaseStr, payload, tryNo)
+                       : Promise.reject(new Error('auto-merge band hai'))).then(function(){
         window._saveAgain=true;         // jud gaya — ab dobara save hoga (neeche wala .then karega)
       }).catch(function(me){
         console.error('[RMS] auto-merge fail:', me);
