@@ -402,8 +402,19 @@ window.LOADED_WID  = {};    // co -> abhi chal rahe version ka wid
 window.LOADED_APPLIED_WID = {};  // co -> jo wid humne last apply kiya
 window.LOADED_PURGED = {};  // co -> purane __r<n>__ documents ki safai kahan tak hui
 window.SERVER_SEEN = {};    // co -> server se (cache se nahi) data aa chuka?
-window.BASE_STR = {};       // co -> cloud se jo data aaya tha (edit se PEHLE ka) — merge ke liye
+window.BASE_STR = {};       // co -> cloud pe jo data tha (edit se PEHLE ka) — merge ke liye
+window.BASE_REV = {};       // co -> BASE_STR kis rev ka hai
 window._mergeTry = 0;       // ek save ke liye kitni baar merge try kiya
+
+// BASE hamesha "cloud ka sabse NAYA maalum data" hona chahiye.
+// Do jagah se set hota hai — cloud se data aane pe, aur apna save safal hone pe.
+// Kaunsa naya hai ye rev se tay karo, warna dono aapas me ulat-pulat kar dete the.
+function setBase(co, str, rev){
+  var cur=window.BASE_REV[co];
+  if(typeof rev==='number' && typeof cur==='number' && rev<cur) return;   // purana hai, chhodo
+  window.BASE_STR[co]=str;
+  if(typeof rev==='number') window.BASE_REV[co]=rev;
+}
 
 // har save ka apna unique naam — do device kabhi ek hi document pe nahi likhenge
 function newWid(){
@@ -575,7 +586,7 @@ function _applyRemote(co, payloadStr, fromCache, rev){
   DBS[co]=db;
   // BASE = cloud se aaya data, edit se pehle ka. Conflict pe isse compare karke
   // pata chalta hai ki "maine kya joda/badla/hataya".
-  window.BASE_STR[co]=JSON.stringify(db);
+  setBase(co, JSON.stringify(db), rev);
   if(rev!=null) window.LOADED_REV[co]=rev;
   if(!fromCache) window.SERVER_SEEN[co]=true;
 
@@ -628,8 +639,13 @@ function fbCloudSave(){
   // meta me zinda versions ki poori list rehti hai, isliye koi anaath nahi rehta.
   var live=(window.LOADED_LIVE[co]||[]).filter(function(x){ return x && x.w; });
   live.push({ r:newRev, w:myWid });
-  var keepLive=live.slice(-3);                           // aakhri 3 zinda rahenge
-  var dropLive=live.slice(0,-3);                         // baaki hatao
+  // Kitne purane version bacha ke rakhne hain.
+  // 3 bahut kam nikla — roz sainkdon save hote hain, to 3 version sirf 2-3 minute
+  // ka itihaas dete the (PO 1129 isi wajah se wapas nahi mila). 15 se ~30 minute
+  // milta hai. Storage ~22 MB (Spark me 1 GB milta hai).
+  var KEEP_VERSIONS=15;
+  var keepLive=live.slice(-KEEP_VERSIONS);
+  var dropLive=live.slice(0,-KEEP_VERSIONS);
   // purane __r<n>__ documents (v2 wale) — thode-thode karke saaf karo
   var purgedUpTo=window.LOADED_PURGED[co]||0;
   var purgeTo=Math.min(purgedUpTo+20, newRev-1);         // ek baar me max 20
@@ -667,7 +683,7 @@ function fbCloudSave(){
     window.LOADED_WID[co]=myWid;
     window.LOADED_APPLIED_WID[co]=myWid;
     window.LOADED_PURGED[co]=newPurged;
-    window.BASE_STR[co]=payload;        // ab cloud pe yahi hai -> agla BASE yahi
+    setBase(co, payload, newRev);       // ab cloud pe yahi hai -> agla BASE yahi
     window._mergeTry=0;
     fbShowSyncBadge('✅ Saved (v'+newRev+')','rgba(26,107,60,.9)');
     // meta commit ho chuka — ab purane chunks hatana surakshit hai
@@ -678,13 +694,11 @@ function fbCloudSave(){
       // sirf APNE wid ke chunks hatao — ye pakka sirf humne likhe hain,
       // isliye kisi aur ke zinda chunks kabhi delete nahi honge
       _fbDeleteWid(base,myWid,parts.length);
-      // ⛔ AUTO-MERGE ABHI BAND HAI.
-      // Bug: save ke beech me doosre device ka data aa jaye to _applyRemote
-      // BASE_STR naya kar deta tha, par save-success wali line use wapas purane
-      // payload pe set kar deti thi. Phir BASE aur DBS alag ho jate the, aur
-      // agle merge me naye records "user ne delete kiye" samajh ke UD jate the
-      // (PO 1128/1129 isi se gaye). Theek karke, test karke hi wapas chalu karenge.
-      var MERGE_ON=false;
+      // AUTO-MERGE — do suraksha ke saath wapas chalu:
+      //  1) BASE ab rev se tay hota hai (setBase), isliye aapas me ulat-pulat nahi
+      //  2) merge ab DELETE kar hi nahi sakta — sirf jodta/badalta hai
+      // (PO 1128/1129 in dono ki kami se gaye the)
+      var MERGE_ON=true;
       // ── pehle KHUD jodne ki koshish karo (auto-merge) ──
       fbShowSyncBadge('🔀 Dono ka data jod raha hoon...','rgba(146,64,14,.95)');
       var tryNo=window._mergeTry||0;
@@ -757,11 +771,23 @@ function _mergeArray(base, mine, server, name, notes){
     else if(!_same(m[k], b[k])) iChanged[k]=1;
   });
 
+  // ⛔ MERGE KABHI DELETE NAHI KAREGA.
+  // Pehle "base me tha, mine me nahi" ko delete maan liya jata tha. Agar BASE aur
+  // DBS kisi wajah se alag ho jayein, to naye records "delete kar do" samajh liye
+  // jate the — PO 1129 isi tarah uda tha.
+  // Ab merge sirf JODTA aur BADALTA hai. Delete user ko dobara karna padega —
+  // wo choti taqleef hai, par data kabhi gum nahi hoga.
+  var deletedCount=Object.keys(iRemoved).length;
+  if(deletedCount){
+    notes.push(name+': '+deletedCount+' record tumne hataye the — merge me wapas aa gaye, dobara delete kar dena');
+    iRemoved={};                                  // delete ki taakat hi khatam
+  }
+
   var out=[], seen={};
   // server ka kram banaye rakho
   (server||[]).forEach(function(r){
     var k=_recKey(r);
-    if(iRemoved[k]) return;                       // maine delete kiya tha
+    if(iRemoved[k]) return;                       // (ab kabhi true nahi hoga)
     seen[k]=1;
     if(iChanged[k]){
       // dono ne same record badla? -> mera chalega, par bata do
@@ -782,7 +808,9 @@ function _mergeArray(base, mine, server, name, notes){
 function _mergeMap(base, mine, server, name, notes){
   var out={};
   Object.keys(server||{}).forEach(function(k){ out[k]=server[k]; });
-  Object.keys(base||{}).forEach(function(k){ if(!(k in (mine||{}))) delete out[k]; });   // maine hataya
+  // ⛔ yahan bhi delete band — sirf jodna/badalna (array wali wajah hi)
+  var gone=Object.keys(base||{}).filter(function(k){ return !(k in (mine||{})); });
+  if(gone.length) notes.push(name+': '+gone.length+' entry tumne hatayi thi — wapas aa gayi, dobara hata dena');
   Object.keys(mine||{}).forEach(function(k){
     var had=(k in (base||{}));
     if(had && _same(mine[k], base[k])) return;              // maine chhua hi nahi
@@ -884,7 +912,7 @@ function _autoMerge(co, myBaseStr, myPayload, attempt){
 
     // merged ko memory me lao, aur naya BASE = cloud ka data
     DBS[co]=res.data;
-    window.BASE_STR[co]=JSON.stringify(srv.data);
+    setBase(co, JSON.stringify(srv.data), (srv.meta && srv.meta.rev));
     window.LOADED_REV[co]=(srv.meta && srv.meta.rev)||0;
     window.LOADED_LIVE[co]=(srv.meta && Array.isArray(srv.meta.live))?srv.meta.live.slice():[];
     window.LOADED_PURGED[co]=(srv.meta && typeof srv.meta.purgedUpTo==='number')?srv.meta.purgedUpTo:0;
@@ -1922,6 +1950,60 @@ function reelCutQtyFY(rno, reelObj){
   });
   return round(u,2);
 }
+// ═══════════════════════════════════════════════════════════════════
+// REEL INDEX — ek hi baar saare orders ghoom ke har reel ka hisaab bana lo
+//
+// Pehle Inventory table har reel ke liye SAARE order-lines dobara-dobara scan
+// karta tha (1667 reels x 3 baar x 1087 lines = 54 lakh chakkar, har render pe).
+// Ab ek hi baar sab ghoom ke maps bana lete hain -> ~2,700 chakkar.
+//
+// Numbers bilkul wahi rehte hain — sirf ginne ka tarika badla hai. Index sirf
+// ek render ke liye banta hai (stale hone ka sawaal hi nahi).
+// ═══════════════════════════════════════════════════════════════════
+function buildReelIndex(){
+  var used={}, ord={}, cutFY={}, soldFY={}, soldAll={};
+  var add=function(m,id,v){ m[id]=(m[id]||0)+v; };
+
+  (DB.orders||[]).forEach(function(o){
+    var inF = inFY(o.cutDate || o.poDate || '');
+    getLines(o).forEach(function(L){
+      var rr=resolveReelForLine(L,false); if(!rr) return;
+      // reelUsed/reelOrderQty pehle L.reelNo ko rno se milate the, phir reel resolve
+      // karte the. Wahi shart yahan bhi — warna ginti badal jayegi.
+      if(String(L.reelNo)!==String(rr.rno)) return;
+      var id=String(rr.id);
+      var cons=lineConsume(L);
+      add(used, id, cons);
+      add(ord,  id, lineOrderPending(L));
+      if(inF) add(cutFY, id, cons);
+    });
+  });
+
+  // direct reel sales — ek sale kai reels se match kar sakti hai (duplicate reel no.),
+  // purana code bhi har matching reel me ginta tha, isliye waisa hi rakha hai
+  var byRno={};
+  (DB.reels||[]).forEach(function(r){ (byRno[String(r.rno)] = byRno[String(r.rno)]||[]).push(r); });
+  (DB.reelSales||[]).forEach(function(s){
+    var qty=(parseFloat(s.qty)||0);
+    var inF=inFY(s.date);
+    (byRno[String(s.rno)]||[]).forEach(function(r){
+      if(!_saleMatchesReel(s, r)) return;
+      var id=String(r.id);
+      add(used, id, qty);
+      add(soldAll, id, qty);
+      if(inF) add(soldFY, id, qty);
+    });
+  });
+
+  var get=function(m,r){ return round(m[String(r.id)]||0, 2); };
+  return {
+    used:       function(r){ return get(used, r); },
+    orderQty:   function(r){ return get(ord, r); },
+    cutQtyFY:   function(r){ return get(cutFY, r); },
+    soldQtyFY:  function(r){ return get(soldFY, r); },
+    soldQtyAll: function(r){ return get(soldAll, r); }
+  };
+}
 function reelUsed(rno, reelObj){
   var u=0;
   var r = reelObj || DB.reels.find(function(x){ return String(x.rno)===String(rno); });
@@ -2213,18 +2295,20 @@ function renderInv(){
     if(!aNum && bNum) return 1;
     return String(b.rno||'').localeCompare(String(a.rno||''));
   });
+  // har reel ke liye alag-alag scan karne ki jagah — ek hi baar poora index bana lo
+  var RIX=buildReelIndex();
   invList.forEach(function(r){
     if(!isValidReel(r)) return; // khaali entry skip
     if(!upToFY(r.din)) return;  // FY tak ke reels (balance forward)
     var hay=((r.rno||'')+' '+(r.bill||'')+' '+(r.sup||'')+' '+(r.product||'')+' '+(r.mat||'')).toLowerCase();
     if(srch && hay.indexOf(srch)<0) return;
     if(divF && r.mat!==divF) return;
-    var used=reelUsed(r.rno, r), wt=parseFloat(r.wt)||0, bal=round(wt-used,2);
+    var used=RIX.used(r), wt=parseFloat(r.wt)||0, bal=round(wt-used,2);
     // pichle saal ki reel jiska balance khatam — is saal transfer nahi hoti
     if(bal<=0.5 && !inFY(r.din)) return;
-    var ordQty=reelOrderQty(r.rno, r);              // pending order (cut nahi hua) — is reel ka hi
-    var dsQty=reelDirectSoldQty(r.rno, r, true);   // sirf is FY ki direct sale
-    var cutQty=reelCutQtyFY(r.rno, r);              // sirf is FY ki cutting — is reel ka hi
+    var ordQty=RIX.orderQty(r);                     // pending order (cut nahi hua) — is reel ka hi
+    var dsQty=RIX.soldQtyFY(r);                     // sirf is FY ki direct sale
+    var cutQty=RIX.cutQtyFY(r);                     // sirf is FY ki cutting — is reel ka hi
     // Status: cut hua=In Use, sirf order pending=Ordered, warna In Stock, balance khatam=Finished
     var status=bal<=0.5?'Finished':(used>0?'In Use':(ordQty>0?'Ordered':'In Stock'));
     if(stF && status!==stF) return;
@@ -2261,8 +2345,9 @@ function repColVals(rep,col){
   // unique values for a column across that report's source rows
   var set={};
   if(rep==='reel'){
+    var RIXv=buildReelIndex();
     DB.reels.forEach(function(r){
-      var used=reelUsed(r.rno, r), bal=round((parseFloat(r.wt)||0)-used,2);
+      var used=RIXv.used(r), bal=round((parseFloat(r.wt)||0)-used,2);
       var st=bal<=0.5?'Finished':(used>0.5?'Partial':'In Stock');
       var v={rno:r.rno,item:r.product,tone:r.tone,width:r.w,gsm:r.gsm,sup:r.sup,loc:r.loc,status:st}[col];
       set[(v==null||v==='')?'(blank)':String(v)]=1;
@@ -2424,9 +2509,10 @@ function renderReport(){
 
   // ════ REEL-WISE ════
   var rr='', To={orig:0,used:0,bal:0}, rcnt=0;
+  var RIXr=buildReelIndex();              // ek hi baar index — har reel pe scan nahi
   DB.reels.slice().sort(function(a,b){ return (parseInt(a.rno)||0)-(parseInt(b.rno)||0); }).forEach(function(r){
     if(!upToFY(r.din)) return;
-    var used=reelUsed(r.rno, r), wt=parseFloat(r.wt)||0, bal=round(wt-used,2);
+    var used=RIXr.used(r), wt=parseFloat(r.wt)||0, bal=round(wt-used,2);
     var stTxt=bal<=0.5?'Finished':(used>0.5?'Partial':'In Stock');
     if(!passRep('reel','rno',r.rno)) return;
     if(!passRep('reel','item',r.product)) return;
@@ -3570,9 +3656,10 @@ function togglePOCloseAll(orderId){
 function renderPOLines(){
   var reelDatalist=function(sel){
     var opts='';
+    var RIXa=buildReelIndex();
     DB.reels.forEach(function(r){
       if(!isValidReel(r)) return;
-      var bal=round((parseFloat(r.wt)||0)-reelUsed(r.rno, r),2);
+      var bal=round((parseFloat(r.wt)||0)-RIXa.used(r),2);
       if(bal<=0.01 && String(r.rno)!==String(sel)) return;
       opts+='<option value="'+H(r.rno)+'">'+H(r.rno)+' ('+H(r.product||'')+' '+(r.w?H(r.w)+H(r.wunit||'cm'):'')+' '+H(r.gsm||'')+'GSM, bal '+N(bal)+'kg)</option>';
     });
@@ -3580,9 +3667,10 @@ function renderPOLines(){
   };
   var reelOptsFor=function(sel){
     var opts='<option value="">-- reel --</option>';
+    var RIXb=buildReelIndex();
     DB.reels.forEach(function(r){
       if(!isValidReel(r)) return;
-      var bal=round((parseFloat(r.wt)||0)-reelUsed(r.rno, r),2);
+      var bal=round((parseFloat(r.wt)||0)-RIXb.used(r),2);
       // balance 0 wali skip, par jo abhi selected hai woh dikhe
       if(bal<=0.01 && String(r.rno)!==String(sel)) return;
       opts+='<option'+(String(r.rno)===String(sel)?' selected':'')+'>'+H(r.rno)+'</option>';
@@ -4954,8 +5042,9 @@ function getExcelData(which){
     return rows;
   }
   if(which==='inventory'){
+    var RIXx=buildReelIndex();
     return DB.reels.filter(function(r){return isValidReel(r)&&upToFY(r.din);}).map(function(r){
-      var used=reelUsed(r.rno, r);
+      var used=RIXx.used(r);
       return { 'Reel No':r.rno,'Aane ki Date':fmtDate(r.din),'Bill No':r.bill,'Supplier':r.sup,'Item':r.product,
         'Division':r.mat,'Tone':r.tone,'Width':(r.w||'')+(r.w?' '+(r.wunit||'cm'):''),'GSM':r.gsm,'Weight':r.wt,'Used':used,'Balance':round((parseFloat(r.wt)||0)-used,2),
         'Core':r.core,'Location':r.loc,'Remark':r.rem };
@@ -5953,9 +6042,10 @@ function renderDashboard(){
 
   var totReels=0, totWt=0, totUsed=0, totBal=0, totBalReels=0;
   var divMap={};
+  var RIXd=buildReelIndex();              // ek hi baar index — har reel pe scan nahi
   DB.reels.forEach(function(r){
     if(!isValidReel(r)||!upToFY(r.din)) return;
-    var used=reelUsed(r.rno, r), wt=parseFloat(r.wt)||0, bal=wt-used;
+    var used=RIXd.used(r), wt=parseFloat(r.wt)||0, bal=wt-used;
     totReels++; totWt+=wt; totUsed+=used; totBal+=bal;
     if(bal>0.5) totBalReels++;
     var dv=(r.mat&&r.mat.trim())?r.mat.trim():'(bina division)';
