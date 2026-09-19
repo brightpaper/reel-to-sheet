@@ -5648,6 +5648,17 @@ function renderCuttingRegister(){
   // NOTE: H() quote escape nahi karta — value attribute ke liye "&quot;" zaroori hai,
   // warna 5" jaisa remark likhne pe row toot jati thi
   var tfld=function(k,key,val,w){ return '<input type="text" value="'+H(val||'').replace(/"/g,'&quot;')+'" onchange="crSet(\''+k+'\',\''+key+'\',this.value)" placeholder="-" style="width:'+(w||90)+'px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:10px;"/>'; }
+  // Reel Size — manual bhi likh sakte ho. Jab tak kuch na likho tab tak reel se
+  // aane wali value hi dikhegi; khali kar doge to phir se auto par aa jayegi.
+  var rsfld=function(k,val,autoVal){
+    var manual=String(val||'').trim();
+    var show = manual || ((autoVal && autoVal!=='-') ? autoVal : '');
+    return '<input type="text" value="'+H(show).replace(/"/g,'&quot;')+'"'+
+      ' onchange="crSet(\''+k+'\',\'reelSize\',this.value)" placeholder="-"'+
+      ' title="'+(manual?'Manual likha hua':'Reel se apne aap')+'"'+
+      ' style="width:85px;padding:2px 4px;border:1px solid '+(manual?'#0e7490':'#ccc')+';'+
+      'border-radius:4px;font-size:10px;'+(manual?'color:#0e7490;font-weight:bold;':'')+'"/>';
+  }
   list.forEach(function(o){
     var lines=getLines(o); if(!lines.length) lines=[{}];
     var hay=((o.poNo||'')+' '+(o.party||'')+' '+(o.item||'')).toLowerCase();
@@ -5676,7 +5687,7 @@ function renderCuttingRegister(){
         '<td class="crfz crfz1"'+(li>0?' style="background:#fafafa;"':'')+'>'+poCell+'</td>'+
         '<td class="crfz crfz2"'+(li>0?' style="background:#fafafa;"':'')+'>'+(li===0?fmtDate(o.poDate):'')+'</td>'+
         '<td class="crfz crfz3"'+(li>0?' style="background:#fafafa;"':'')+'>'+(li===0?H(o.party||'-'):'')+'</td>'+
-        '<td>'+reelSize+'</td>'+
+        '<td>'+rsfld(k, ex.reelSize, reelSize)+'</td>'+        // Reel Size — manual likh sakte ho
         '<td class="num">'+H(gsm||'-')+'</td>'+
         '<td>'+H(o.item||'-')+'</td>'+                             // auto quality (order item)
         '<td>'+tfld(k,'quality',ex.quality,100)+'</td>'+           // MANUAL quality
