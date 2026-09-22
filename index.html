@@ -1812,8 +1812,10 @@ function fmtDate(iso){
   return iso;
 }
 function round(n,d){ if(d==null)d=2; var f=Math.pow(10,d); return Math.round((parseFloat(n)||0)*f)/f; }
-function wUnit(r){ if(!r) return ''; var w=r.w; if(w===undefined||w===null||w==='') return ''; return w+' '+(r.wunit||'cm'); }
-function unitFull(u){ u=(u||'cm'); return u==='in'?'inch':u; }
+function wUnit(r){ if(!r) return ''; var w=r.w; if(w===undefined||w===null||w==='') return ''; return w+' '+unitFull(r.wunit); }
+function unitFull(u){ return normUnit(u)==='in'?'inch':'cm'; }
+// stored unit ko ek hi form me lao: 'in' ya 'cm' (purana data 'inch' bhi ho sakta hai)
+function normUnit(u){ u=String(u||'').trim().toLowerCase(); return (u==='in'||u==='inch'||u==='"')?'in':'cm'; }
 
 // ─── FINANCIAL YEAR (April–March) ───
 function dateToFY(iso){
@@ -2948,7 +2950,7 @@ function onReelSalePick(){
   var r=DB.reels.find(function(x){return String(x.id)===String(rid);});
   if(!r){ box.innerHTML='Reel nahi mili.'; return; }
   var bal=reelBalanceOf(r.rno, r);
-  box.innerHTML='Reel No: <b>'+H(r.rno)+'</b> | <b>'+H(r.product||'-')+'</b> | Tone: '+H(r.tone||'-')+' | Width: '+H(r.w||'-')+' '+H(r.wunit||'')+
+  box.innerHTML='Reel No: <b>'+H(r.rno)+'</b> | <b>'+H(r.product||'-')+'</b> | Tone: '+H(r.tone||'-')+' | Width: '+H(r.w||'-')+' '+unitFull(r.wunit)+
     ' | GSM: '+H(r.gsm||'-')+' | Location: '+H(r.loc||'-')+
     '<br>Original: <b>'+N(parseFloat(r.wt)||0)+' kg</b> | <b style="color:#166534;">Balance: '+N(bal)+' kg</b>';
   var q=document.getElementById('m-rsqty'); if(q && !q.value) q.value=bal;
@@ -3694,8 +3696,8 @@ function openPurchase(id){
       fldSel('Tone / Shade','m-tone',DB.tones,r.tone)+
       fld('Width *','number','m-w',r.w||'')+
       '<div class="fld"><label>Unit</label><select id="m-wunit" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;">'+
-        '<option value="cm"'+((r.wunit||'cm')==='cm'?' selected':'')+'>cm</option>'+
-        '<option value="inch"'+(r.wunit==='inch'?' selected':'')+'>inch</option>'+
+        '<option value="cm"'+(normUnit(r.wunit)==='cm'?' selected':'')+'>cm</option>'+
+        '<option value="in"'+(normUnit(r.wunit)==='in'?' selected':'')+'>inch</option>'+
       '</select></div>'+
       fld('GSM *','number','m-gsm',r.gsm||'')+
       fld('Weight (kg) *','number','m-wt',r.wt||'')+
@@ -3816,7 +3818,7 @@ function renderPOLines(){
       if(!isValidReel(r)) return;
       var bal=round((parseFloat(r.wt)||0)-RIXa.used(r),2);
       if(bal<=0.01 && String(r.rno)!==String(sel)) return;
-      opts+='<option value="'+H(r.rno)+'">'+H(r.rno)+' ('+H(r.product||'')+' '+(r.w?H(r.w)+H(r.wunit||'cm'):'')+' '+H(r.gsm||'')+'GSM, bal '+N(bal)+'kg)</option>';
+      opts+='<option value="'+H(r.rno)+'">'+H(r.rno)+' ('+H(r.product||'')+' '+(r.w?H(r.w)+unitFull(r.wunit):'')+' '+H(r.gsm||'')+'GSM, bal '+N(bal)+'kg)</option>';
     });
     return opts;
   };
@@ -3861,8 +3863,8 @@ function renderPOLines(){
       '<td>'+(i+1)+'</td>'+
       '<td><input list="pol-reels-'+i+'" value="'+H(L.reelNo)+'" onchange="onPOReel('+i+',this.value)" placeholder="🔍 reel" style="padding:4px;border:1px solid #ccc;border-radius:4px;width:100px;"/>'+
         '<datalist id="pol-reels-'+i+'">'+reelDatalist(L.reelNo)+'</datalist></td>'+
-      '<td class="num" id="pol-size-'+i+'" style="font-family:monospace;color:#0e7490;font-weight:bold;white-space:nowrap;">'+(r?(r.w?H(r.w)+' '+H(r.wunit||'cm'):'-'):'-')+'</td>'+
-      '<td class="num" id="pol-bal-'+i+'" style="font-family:monospace;color:'+(rbalNum&&rbal<0?'#b91c1c':'#0e7490')+';font-weight:bold;">'+(rbalNum?N(rbal):'-')+(r?'<div style="font-size:9px;font-weight:normal;color:#888;">'+(r.w?H(r.w)+' '+H(r.wunit||'cm'):'-')+' × '+H(r.gsm||'-')+'</div>':'')+'</td>'+
+      '<td class="num" id="pol-size-'+i+'" style="font-family:monospace;color:#0e7490;font-weight:bold;white-space:nowrap;">'+(r?(r.w?H(r.w)+' '+unitFull(r.wunit):'-'):'-')+'</td>'+
+      '<td class="num" id="pol-bal-'+i+'" style="font-family:monospace;color:'+(rbalNum&&rbal<0?'#b91c1c':'#0e7490')+';font-weight:bold;">'+(rbalNum?N(rbal):'-')+(r?'<div style="font-size:9px;font-weight:normal;color:#888;">'+(r.w?H(r.w)+' '+unitFull(r.wunit):'-')+' × '+H(r.gsm||'-')+'</div>':'')+'</td>'+
       '<td><input type="number" value="'+H(L.cut)+'" oninput="POL['+i+'].cut=this.value;refreshPOTotal()" style="width:60px;padding:4px;border:1px solid #c4b5fd;border-radius:4px;background:#f5f3ff;"/></td>'+
       '<td><input type="number" value="'+H(L.choppingSheet)+'" oninput="POL['+i+'].choppingSheet=this.value;refreshPOTotal()" style="width:80px;padding:4px;border:1px solid #c4b5fd;border-radius:4px;background:#f5f3ff;"/></td>'+
       '<td><input type="number" value="'+H(L.length)+'" oninput="POL['+i+'].length=this.value;refreshPOTotal()" style="width:60px;padding:4px;border:1px solid #ccc;border-radius:4px;"/></td>'+
@@ -3882,7 +3884,7 @@ function renderPOLines(){
     '</tr>';
     if(r){
       html+='<tr style="background:#f7f9fc;font-size:10px;color:#666;"><td></td><td colspan="14">'+
-        '↳ Reel '+H(r.rno)+' | Item: '+H(r.product||'-')+' | Tone: '+H(r.tone||'-')+' | Width: '+(r.w?H(r.w)+' '+H(r.wunit||'cm'):'-')+
+        '↳ Reel '+H(r.rno)+' | Item: '+H(r.product||'-')+' | Tone: '+H(r.tone||'-')+' | Width: '+(r.w?H(r.w)+' '+unitFull(r.wunit):'-')+
         ' | GSM: '+H(r.gsm||'-')+' | Reel Wt: '+N(r.wt)+' kg | Is line se pehle available: <b style="color:'+(rbalNum&&rbal<0?'#b91c1c':'#0e7490')+';">'+(rbalNum?N(rbal):'-')+' kg</b></td></tr>';
     }
   });
@@ -3936,7 +3938,7 @@ function onPOReel(i, rno){
     var msg='Reel '+rno+' ki '+matches.length+' entries hain. Kaunsi chahiye? Number likho:\n\n';
     matches.forEach(function(m,idx){
       var bal=round((parseFloat(m.wt)||0)-reelUsed(m.rno,m),2);
-      msg+=(idx+1)+'. '+(m.product||'-')+' | '+(m.w||'-')+' '+(m.wunit||'')+' | '+(m.gsm||'-')+'GSM | bal '+N(bal)+'kg\n';
+      msg+=(idx+1)+'. '+(m.product||'-')+' | '+(m.w||'-')+' '+unitFull(m.wunit)+' | '+(m.gsm||'-')+'GSM | bal '+N(bal)+'kg\n';
     });
     var pick=prompt(msg,'1');
     var pi=parseInt(pick)-1;
@@ -3950,7 +3952,7 @@ function onPOReel(i, rno){
   if(r){
     // ye khaas reel poori direct sale ho chuki hai? (reel object se check)
     if(isReelDirectSold(r.rno, r) && round((parseFloat(r.wt)||0)-reelUsed(r.rno,r),2)<=0.01){
-      showToast('🎞 Ye reel '+r.rno+' ('+(r.product||'')+' '+(r.w||'')+(r.wunit||'')+') poori direct sale ho chuki hai',true);
+      showToast('🎞 Ye reel '+r.rno+' ('+(r.product||'')+' '+(r.w||'')+unitFull(r.wunit)+') poori direct sale ho chuki hai',true);
       POL[i].reelNo=''; POL[i].reelId='';
       if(document.getElementById('pol-wrap')) renderPOLines();
       return;
@@ -3961,7 +3963,7 @@ function onPOReel(i, rno){
     if(r.tone) S('m-tone', r.tone);
   }
   var gsmEl=document.getElementById('pol-gsm-'+i); if(gsmEl) gsmEl.value=r?(r.gsm||''):'';
-  var szEl=document.getElementById('pol-size-'+i); if(szEl) szEl.innerHTML=r?(r.w?H(r.w)+' '+H(r.wunit||'cm'):'-'):'-';
+  var szEl=document.getElementById('pol-size-'+i); if(szEl) szEl.innerHTML=r?(r.w?H(r.w)+' '+unitFull(r.wunit):'-'):'-';
   updatePOBalances();
   refreshPOTotal();
 }
@@ -3983,7 +3985,7 @@ function updatePOBalances(){
       var rbal=round((parseFloat(r.wt)||0)-(preUsed[key]||0)-(runUsed[key]||0),2);
       runUsed[key]=(runUsed[key]||0)+lineConsume(L);
       el.style.color=(rbal<0?'#b91c1c':'#0e7490');
-      el.innerHTML=N(rbal)+'<div style="font-size:9px;font-weight:normal;color:#888;">'+(r.w?H(r.w)+' '+H(r.wunit||'cm'):'-')+' × '+H(r.gsm||'-')+'</div>';
+      el.innerHTML=N(rbal)+'<div style="font-size:9px;font-weight:normal;color:#888;">'+(r.w?H(r.w)+' '+unitFull(r.wunit):'-')+' × '+H(r.gsm||'-')+'</div>';
     } else { el.innerHTML='-'; }
   });
 }
@@ -4289,7 +4291,7 @@ function saveModal(){
   var t=editCtx.type;
   if(t==='purchase'){
     var no=G('m-rno').trim();
-    var wt=num('m-wt'), w=num('m-w'), gsm=num('m-gsm'), din=G('m-din'), wunit=G('m-wunit')||'cm';
+    var wt=num('m-wt'), w=num('m-w'), gsm=num('m-gsm'), din=G('m-din'), wunit=normUnit(G('m-wunit'));
     if(!no||!wt||!w||!gsm||!din){ showToast('Reel No, Width, GSM, Weight aur Aane ki Date zaroori',true); return; }
     if(!editCtx.id){
       // naya — duplicate check
@@ -4938,7 +4940,7 @@ function printOrder(id){
     var actCut=(L.actSheet||0)>0;
     page1Rows+='<tr>'+
       '<td class="c"><b>'+H(L.reelNo)+'</b></td>'+
-      '<td class="c">'+H(rr?(rr.w?rr.w+' '+(rr.wunit||'cm'):'-'):(L.width||'-'))+'</td>'+   // Size (reel width + unit)
+      '<td class="c">'+H(rr?(rr.w?rr.w+' '+unitFull(rr.wunit):'-'):(L.width||'-'))+'</td>'+   // Size (reel width + unit)
       '<td class="c">'+H(L.gsm)+'</td>'+                          // GSM (reel)
       '<td class="r">'+availBefore+'</td>'+                       // Reel Qty
       cell(L.cut, true, 0)+                                       // Cut
@@ -5201,14 +5203,14 @@ function getExcelData(which){
     return DB.reels.filter(function(r){return isValidReel(r)&&upToFY(r.din);}).map(function(r){
       var used=RIXx.used(r);
       return { 'Reel No':r.rno,'Aane ki Date':fmtDate(r.din),'Bill No':r.bill,'Supplier':r.sup,'Item':r.product,
-        'Division':r.mat,'Tone':r.tone,'Width':(r.w||'')+(r.w?' '+(r.wunit||'cm'):''),'GSM':r.gsm,'Weight':r.wt,'Used':used,'Balance':round((parseFloat(r.wt)||0)-used,2),
+        'Division':r.mat,'Tone':r.tone,'Width':(r.w||'')+(r.w?' '+unitFull(r.wunit):''),'GSM':r.gsm,'Weight':r.wt,'Used':used,'Balance':round((parseFloat(r.wt)||0)-used,2),
         'Core':r.core,'Location':r.loc,'Remark':r.rem };
     });
   }
   if(which==='purchase'){
     return (DB.purchases||[]).filter(function(p){return inFY(p.din);}).map(function(p){
       return { 'Aane ki Date':fmtDate(p.din),'Reel No':p.rno,'Bill No':p.bill,'Supplier':p.sup,'Item':p.product,
-        'Tone':p.tone,'Width':(p.w||'')+(p.w?' '+(p.wunit||'cm'):''),'GSM':p.gsm,'Weight':p.wt,'Location':p.loc,'Remark':p.rem };
+        'Tone':p.tone,'Width':(p.w||'')+(p.w?' '+unitFull(p.wunit):''),'GSM':p.gsm,'Weight':p.wt,'Location':p.loc,'Remark':p.rem };
     });
   }
   if(which==='sales'){
@@ -5766,7 +5768,7 @@ function crReelSize(o){
   // pehli line ki reel width (unit ke saath agar reel mile)
   var L=(getLines(o)[0])||{};
   var r=resolveReelForLine(L,false);
-  if(r && r.w!==undefined && r.w!=='') return H(r.w)+' '+(r.wunit||'cm');
+  if(r && r.w!==undefined && r.w!=='') return H(r.w)+' '+unitFull(r.wunit);
   return L.width?H(L.width):'-';
 }
 function crSheetSize(o){
@@ -5820,7 +5822,7 @@ function renderCuttingRegister(){
       var hasReelNo=String(L.reelNo||'').trim()!=='';
       var reelSize='-';
       if(hasReelNo){
-        reelSize=(r&&r.w!==undefined&&r.w!=='')?(H(r.w)+' '+(r.wunit||'cm')):(L.width?H(L.width):'-');
+        reelSize=(r&&r.w!==undefined&&r.w!=='')?(H(r.w)+' '+unitFull(r.wunit)):(L.width?H(L.width):'-');
       }
       var gsm=(parseFloat(L.varGsm)||0)>0?L.varGsm:(L.gsm||'');
       var sheetSize=(L.length&&L.width)?(H(L.length)+'*'+H(L.width)+(gsm?'*'+H(gsm):'')):'-';
