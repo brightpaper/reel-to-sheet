@@ -216,6 +216,13 @@ var CO = 'jayambe';   // current company
 </div>
 <div id="fb-sync-badge" style="display:none;">☁️ Syncing</div>
 <div id="toast"></div>
+<!-- ═══ OUTBOX BAR — jo entry save nahi hui thi uski patti ═══ -->
+<div id="outbox-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:6500;background:#b45309;color:#fff;padding:9px 14px;align-items:center;gap:12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.25);flex-wrap:wrap;">
+  <span id="outbox-msg" style="flex:1;min-width:240px;"></span>
+  <button onclick="outboxRestore()" style="padding:6px 14px;border:none;border-radius:6px;background:#166534;color:#fff;font-weight:bold;font-size:13px;cursor:pointer;white-space:nowrap;">↩ Wapas Daalo</button>
+  <button onclick="outboxDismiss()" style="padding:6px 12px;border:1px solid rgba(255,255,255,.5);border-radius:6px;background:transparent;color:#fff;font-size:12px;cursor:pointer;white-space:nowrap;">Chhod do</button>
+</div>
+
 <!-- ═══ LOAD GATE — asli data aane tak entry band [Phase 1] ═══ -->
 <div id="load-gate" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.94);z-index:7000;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:#fff;text-align:center;padding:24px;">
   <div style="font-size:40px;">🔄</div>
@@ -470,6 +477,8 @@ function onFirstServerLoad(){
   if(window._startupShown) return;
   window._startupShown=true;
   if(window.showStartupModal) showStartupModal();
+  // cloud ka asli data aa gaya — ab dekho outbox me kuch pending pada hai kya
+  setTimeout(function(){ if(window.outboxCheck) outboxCheck(); }, 1200);
 }
 
 function attachCompany(co){
@@ -623,6 +632,10 @@ function fbCloudSave(){
   // save ke waqt ka BASE pakad lo — conflict tak DBS badal sakta hai,
   // isliye merge me yahi jodi (base, payload) use hogi
   var myBaseStr=window.BASE_STR[co];
+  // OUTBOX: save shuru hone se PEHLE change browser me likh do. Save safal hone
+  // pe hat jayega; fail/tab-band/crash hua to bacha rahega aur agli baar patti
+  // dikhegi. (PO 1158 jaisa "save hua hi nahi" wala case isse pakda jayega.)
+  outboxPut(co, myBaseStr, payload);
   var CHUNK=700000, parts=[];
   for(var i=0;i<payload.length;i+=CHUNK) parts.push(payload.slice(i,i+CHUNK));
   if(!parts.length) parts=[''];
@@ -684,6 +697,7 @@ function fbCloudSave(){
     window.LOADED_APPLIED_WID[co]=myWid;
     window.LOADED_PURGED[co]=newPurged;
     setBase(co, payload, newRev);       // ab cloud pe yahi hai -> agla BASE yahi
+    outboxClear(co);                    // save ho gaya -> outbox khali
     window._mergeTry=0;
     fbShowSyncBadge('✅ Saved (v'+newRev+')','rgba(26,107,60,.9)');
     // meta commit ho chuka — ab purane chunks hatana surakshit hai
@@ -925,6 +939,138 @@ function _autoMerge(co, myBaseStr, myPayload, attempt){
     }
     return res.notes;
   });
+}
+// ═══════════════════════════════════════════════════════════════════
+// OUTBOX — jo entry save na ho paye wo browser me bachi rahe
+//
+// Save shuru hone se PEHLE "maine kya joda/badla" browser ki storage me likh
+// dete hain. Save safal -> hata dete hain. Save fail (conflict, net, tab band,
+// browser crash) -> wahin padi rehti hai, aur agli baar app khulte hi patti
+// dikhti hai: "N entry save nahi hui thi — wapas daalo".
+//
+// Poora database nahi, sirf CHANGE store hota hai (do-chaar KB), isliye halka.
+// PO 1158 jaisa case — jahan save hua hi nahi tha — ab pakda jayega.
+// ═══════════════════════════════════════════════════════════════════
+function _outboxKey(co){ return 'rms_outbox_'+co; }
+
+// BASE se compare karke nikaalo: maine kya JODA / BADLA (delete nahi)
+function _myChanges(baseStr, payloadStr){
+  var base, mine;
+  try { base=JSON.parse(baseStr||'{}')||{}; mine=JSON.parse(payloadStr)||{}; }
+  catch(e){ return null; }
+  var out={};
+  Object.keys(mine).forEach(function(k){
+    var m=mine[k], b=base[k];
+    if(Array.isArray(m)){
+      var bk=_byKey(b||[]);
+      var neu=m.filter(function(r){ var key=_recKey(r); return !bk[key] || !_same(r, bk[key]); });
+      if(neu.length) out[k]=neu;
+    } else if(m && typeof m==='object'){
+      var bm=(b && typeof b==='object')?b:{}, mm={};
+      Object.keys(m).forEach(function(kk){ if(!(kk in bm) || !_same(m[kk], bm[kk])) mm[kk]=m[kk]; });
+      if(Object.keys(mm).length) out[k]=mm;
+    }
+  });
+  return Object.keys(out).length ? out : null;
+}
+
+function outboxPut(co, baseStr, payloadStr){
+  try{
+    var ch=_myChanges(baseStr, payloadStr);
+    if(!ch){ outboxClear(co); return; }
+    localStorage.setItem(_outboxKey(co), JSON.stringify({
+      at:Date.now(), by:(window.FB_USER&&window.FB_USER.email)||'', items:ch
+    }));
+  }catch(e){ console.warn('[RMS] outbox likhne me dikkat:', e && e.name); }
+}
+function outboxGet(co){
+  try{ var s=localStorage.getItem(_outboxKey(co)); return s?JSON.parse(s):null; }catch(e){ return null; }
+}
+function outboxClear(co){ try{ localStorage.removeItem(_outboxKey(co)); }catch(e){} }
+
+// Outbox me jo pada hai, usme se kitna CLOUD PE NAHI hai
+function outboxPending(co){
+  var ob=outboxGet(co); if(!ob || !ob.items) return null;
+  var cur=DBS[co]; if(!cur) return null;
+  var missing={}, n=0, what=[];
+  Object.keys(ob.items).forEach(function(k){
+    var v=ob.items[k];
+    if(Array.isArray(v)){
+      var ck=_byKey(cur[k]||[]);
+      var miss=v.filter(function(r){ var key=_recKey(r); return !ck[key] || !_same(r, ck[key]); });
+      if(miss.length){
+        missing[k]=miss; n+=miss.length;
+        miss.slice(0,3).forEach(function(r){
+          var lbl = r.poNo ? ('PO '+r.poNo) : (r.rno ? ('Reel '+r.rno) : (r.saleOrder||r.id||''));
+          what.push(k+': '+lbl);
+        });
+      }
+    } else if(v && typeof v==='object'){
+      var cm=(cur[k] && typeof cur[k]==='object')?cur[k]:{}, mm={};
+      Object.keys(v).forEach(function(kk){ if(!(kk in cm) || !_same(v[kk], cm[kk])) mm[kk]=v[kk]; });
+      if(Object.keys(mm).length){ missing[k]=mm; n+=Object.keys(mm).length; what.push(k+': '+Object.keys(mm).length+' entry'); }
+    }
+  });
+  return n ? { count:n, items:missing, at:ob.at, by:ob.by, what:what } : null;
+}
+
+// ─── patti (banner) ───
+function outboxCheck(){
+  try{
+    var p=outboxPending(CO);
+    var el=document.getElementById('outbox-bar');
+    if(!el) return;
+    if(!p){ el.style.display='none'; outboxClear(CO); return; }
+    // ── 24 ghante se nayi entry: APNE AAP wapas daal do ──
+    // User ko kuch samajhna/dabana na pade. Purani (24 ghante se zyada) entry
+    // ke liye poochh lete hain — kyunki wo jaan-boojh ke chhodi bhi ho sakti hai.
+    var ageHrs=(Date.now()-(p.at||0))/3600000;
+    if(ageHrs<=24 && window.APP_READY){
+      el.style.display='none';
+      outboxRestore(true);
+      return;
+    }
+    var when=new Date(p.at).toLocaleString();
+    document.getElementById('outbox-msg').innerHTML=
+      '⚠ <b>'+p.count+' entry save nahi hui thi</b> ('+when+(p.by?' — '+H(p.by):'')+') — '+
+      '<span style="opacity:.85;">'+H(p.what.slice(0,3).join(' | '))+(p.what.length>3?' …':'')+'</span>';
+    el.style.display='flex';
+  }catch(e){ console.warn('[RMS] outbox check fail', e); }
+}
+function outboxDismiss(){
+  if(!confirm('Ye entries chhod deni hain? Ye phir wapas nahi aayengi.')) return;
+  outboxClear(CO);
+  var el=document.getElementById('outbox-bar'); if(el) el.style.display='none';
+  showToast('Outbox khali kar diya');
+}
+function outboxRestore(auto){
+  var p=outboxPending(CO);
+  if(!p){ outboxClear(CO); var e0=document.getElementById('outbox-bar'); if(e0) e0.style.display='none';
+          showToast('Kuch pending nahi — sab pehle se cloud pe hai'); return; }
+  if(!window.APP_READY){ showToast('Data poora load hone do, phir try karo',true); return; }
+  var db=DBS[CO];
+  Object.keys(p.items).forEach(function(k){
+    var v=p.items[k];
+    if(Array.isArray(v)){
+      if(!Array.isArray(db[k])) db[k]=[];
+      v.forEach(function(r){
+        var key=_recKey(r);
+        var i=-1;
+        for(var j=0;j<db[k].length;j++){ if(_recKey(db[k][j])===key){ i=j; break; } }
+        if(i>=0) db[k][i]=r; else db[k].push(r);
+      });
+    } else if(v && typeof v==='object'){
+      if(!db[k] || typeof db[k]!=='object' || Array.isArray(db[k])) db[k]={};
+      Object.keys(v).forEach(function(kk){ db[k][kk]=v[kk]; });
+    }
+  });
+  DB=db;
+  if(window.renderAll) try{ renderAll(); }catch(e){ console.warn(e); }
+  var el=document.getElementById('outbox-bar'); if(el) el.style.display='none';
+  showToast(auto ? ('✅ '+p.count+' entry jo pichli baar save nahi hui thi — apne aap wapas daal di')
+                 : ('✅ '+p.count+' entry wapas daal di — save ho rahi hai'));
+  console.log('[RMS] outbox se wapas daali:', p.what.join(' | '));
+  dbSave(true);
 }
 // (na-maujood doc delete karna no-op hai, isliye pehle get karne ki zaroorat nahi)
 // ek wid ke saare chunks hatao — naya format
