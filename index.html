@@ -4689,6 +4689,16 @@ function fscUpdate(i){
   // typing rukne ke ~1.2 sec baad ek hi save jayega.
   dbSave();
 }
+// Manual sticker ki Item/Quality list — products ke saath extra qualities (jaise FBB)
+var MS_EXTRA_ITEMS = ['FBB'];
+function msItems(){
+  var list = (DB.products||[]).slice();
+  MS_EXTRA_ITEMS.forEach(function(x){
+    var has = list.some(function(y){ return String(y).trim().toUpperCase()===x.toUpperCase(); });
+    if (!has) list.push(x);
+  });
+  return list;
+}
 function openManualSticker(){
   editCtx={type:'manualsticker'};
   openModal('🏷 Manual Sticker — khud daalo aur print karo');
@@ -4696,7 +4706,7 @@ function openManualSticker(){
     '<div style="text-align:center;font-size:22px;font-weight:bold;letter-spacing:2px;color:#222;'+
       'padding:4px 0 10px;border-bottom:2px solid #222;margin-bottom:14px;">BRIGHT PAPER</div>'+
     '<div class="form-grid-2">'+
-      fldSel('Item / Quality','ms-item',DB.products,'')+
+      fldSel('Item / Quality','ms-item',msItems(),'')+
       fld('PO No.','text','ms-po','')+
       fld('Size (L×W)  jaise 80x50','text','ms-size','','msPreview()')+
       fld('GSM','number','ms-gsm','','msPreview()')+
