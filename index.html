@@ -4708,6 +4708,7 @@ function openManualSticker(){
     '<div class="form-grid-2">'+
       fldSel('Item / Quality','ms-item',msItems(),'')+
       fld('PO No.','text','ms-po','')+
+      fld('📅 Date','date','ms-date',toDay())+
       fld('Size (L×W)  jaise 80x50','text','ms-size','','msPreview()')+
       fld('GSM','number','ms-gsm','','msPreview()')+
       fld('Sheet / Gross','number','ms-spg','100','msPreview()')+
@@ -4760,7 +4761,7 @@ function msPreview(){
 }
 function printManualSticker(){
   var item=G('ms-item').trim(), size=G('ms-size').trim(), gsm=G('ms-gsm').trim();
-  var po=G('ms-po').trim();
+  var po=G('ms-po').trim(), dt=G('ms-date');
   var spg=parseFloat(G('ms-spg'))||100;
   var tg=parseFloat(G('ms-gross'))||0, gpb=parseFloat(G('ms-gpb'))||0;
   var wtGross=msWtGross(), party=G('ms-party').trim();   // wt/gross auto
@@ -4768,7 +4769,7 @@ function printManualSticker(){
   if(gpb<=0){ showToast('Gross/Bundle daalo',true); return; }
   var bun=msBundles(tg,gpb);
   if(!bun.length){ showToast('Sticker nahi bana',true); return; }
-  var info={ item:item, party:party, po:po, size:size, gsm:gsm, reel:'', wtGross:wtGross, spg:spg, manual:true,
+  var info={ item:item, party:party, po:po, date:dt, size:size, gsm:gsm, reel:'', wtGross:wtGross, spg:spg, manual:true,
              heading:'BRIGHT PAPER' };   // sticker ke upar center me chhapega
   var blocks=bun.map(function(x){
     return stickerHTML(info, 'BUNDLE', x.n, x.total, x.gross, round(x.gross*wtGross,2), round(x.gross*spg,0));
@@ -4905,6 +4906,7 @@ function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
       (isB ? '<div class="row"><span>GROSS / BUNDLE</span><b>'+grossQty+'</b></div>' : '')+
       '<div class="row"><span>SHEET / GROSS</span><b>'+info.spg+'</b></div>'+
       (info.manual ? '' : '<div class="row"><span>TOTAL SHEET</span><b>'+N(totalSheet,0)+'</b></div>')+
+      (info.date ? '<div class="row"><span>DATE</span><b>'+H(fmtDate(info.date))+'</b></div>' : '')+
       (isB ? '' : '<div class="row" style="border-bottom:none;"><span>WEIGHT</span><span class="big">'+N(wt,2)+' kg</span></div>')+
     '</div>'+
     '<div class="ft">'+
