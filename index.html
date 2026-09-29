@@ -2195,10 +2195,75 @@ function reelOrderQty(rno, reelObj){
 // ═══════════════════════════════════════════
 // RENDER: PRODUCTION ORDERS (planning) — Open/Cut/Packed sab dikhe
 // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+// NAYA PO ↔ PURANE PO KA MATCH (same Item + same GSM)
+// Sirf naye bane PO ke liye — taki turant pata chale ki isko kis PO ke saath
+// cut kar sakte hain. Poora register rangeen nahi hota.
+// ═══════════════════════════════════════════
+function newPoId(){ try{ return localStorage.getItem('rms_newpo_'+CO)||null; }catch(e){ return window.NEW_PO_ID||null; } }
+function setNewPoId(id){ window.NEW_PO_ID=id; try{ localStorage.setItem('rms_newpo_'+CO, String(id)); }catch(e){} }
+function clearNewPo(){
+  window.NEW_PO_ID=null;
+  try{ localStorage.removeItem('rms_newpo_'+CO); }catch(e){}
+  var a=document.getElementById('po-match-alert'); if(a&&a.parentNode) a.parentNode.removeChild(a);
+  if(window.renderProdOrders) renderProdOrders();
+}
+// PO ke ITEM|GSM keys (ek PO me kai GSM ho sakti hain)
+function _poItemGsmKeys(o){
+  var it=String((o&&o.item)||'').trim().toUpperCase(); if(!it) return [];
+  var ks={};
+  getLines(o).forEach(function(L){ var g=parseFloat(L.gsm)||0; if(g) ks[it+'|'+g]=1; });
+  return Object.keys(ks);
+}
+// is PO se match karti dusri PO ki list
+function poMatchList(oid){
+  if(!oid) return [];
+  var o=DB.orders.find(function(x){ return String(x.id)===String(oid); });
+  if(!o) return [];
+  var ks=_poItemGsmKeys(o); if(!ks.length) return [];
+  var out=[];
+  DB.orders.forEach(function(x){
+    if(String(x.id)===String(o.id)) return;
+    if(!inFY(x.poDate)) return;
+    var xs=_poItemGsmKeys(x);
+    for(var i=0;i<ks.length;i++){ if(xs.indexOf(ks[i])>=0){ out.push({o:x, key:ks[i]}); return; } }
+  });
+  return out;
+}
+// PO save hote hi upar patti — "ye PO in PO se match karta hai"
+function showMatchAlert(poNo, list){
+  var old=document.getElementById('po-match-alert'); if(old&&old.parentNode) old.parentNode.removeChild(old);
+  if(!list || !list.length) return;
+  var k=String(list[0].key||'').split('|');
+  var names=list.map(function(m){ return 'PO '+H(m.o.poNo); }).join(', ');
+  var d=document.createElement('div');
+  d.id='po-match-alert';
+  d.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:99999;'+
+    'background:#fef3c7;border:2px solid #f59e0b;color:#92400e;padding:12px 18px;border-radius:10px;'+
+    'box-shadow:0 8px 28px rgba(0,0,0,.28);font-family:Arial,sans-serif;font-size:14px;max-width:92vw;line-height:1.5;';
+  d.innerHTML='🔗 <b>PO '+H(poNo)+'</b> ka Item + GSM match hua — <b>'+H(k[0])+' / '+H(k[1])+' GSM</b>'+
+    '<span onclick="var e=document.getElementById(\'po-match-alert\'); if(e&&e.parentNode) e.parentNode.removeChild(e);" '+
+      'style="cursor:pointer;float:right;margin-left:14px;font-weight:bold;">✕</span>'+
+    '<div style="margin-top:4px;">Ye PO bhi same hain: <b>'+names+'</b> — saath me cutting plan kar sakte ho.</div>';
+  document.body.appendChild(d);
+  setTimeout(function(){ var x=document.getElementById('po-match-alert'); if(x&&x.parentNode) x.parentNode.removeChild(x); }, 15000);
+}
 function renderProdOrders(){
   var body=document.getElementById('po-body'); if(!body) return;
   var srch=(G('f-po-search')||'').toLowerCase(), stF=G('f-po-status');
   var tsh=0,tq=0,tpend=0,cnt=0,html='';
+
+  // ═══ NAYE PO KA MATCH HIGHLIGHT (Item + GSM) ═══
+  // Purani saari PO nahi — sirf ABHI bana PO aur usse match karne wali PO.
+  var _hi={};                                   // poId -> 'new' | 'match'
+  var _newId=newPoId();
+  if(_newId){
+    var _ml=poMatchList(_newId);
+    if(_ml.length){
+      _hi[String(_newId)]='new';
+      _ml.forEach(function(m){ _hi[String(m.o.id)]='match'; });
+    }
+  }
   DB.orders.slice().sort(function(a,b){ return (parseInt(b.poNo)||0)-(parseInt(a.poNo)||0); }).forEach(function(o){
     if(!inFY(o.poDate)) return;
     var lines=getLines(o);
@@ -2220,10 +2285,12 @@ function renderProdOrders(){
       var c=calcLine(L);
       var first=(li===0);
       var last=(li===nL-1);
-      html+='<tr class="'+(last?'po-end':'')+'"'+(first?'':' style="background:#fafbfd;"')+'>';
+      var mk=_hi[String(o.id)];
+      html+='<tr class="'+(last?'po-end':'')+'"'+(mk?' style="background:'+(mk==='new'?'#fde68a':'#fff3c4')+';"':(first?'':' style="background:#fafbfd;"'))+'>';
       if(first){
         // PO info cells, rowspan = number of lines
-        html+='<td class="po-span" rowspan="'+nL+'"><b>'+H(o.poNo)+'</b></td>'+
+        html+='<td class="po-span" rowspan="'+nL+'"><b>'+H(o.poNo)+'</b>'+
+          (mk?'<div onclick="clearNewPo()" title="Click karo — highlight hat jayega" style="font-size:9px;font-weight:bold;color:#92400e;white-space:nowrap;margin-top:2px;cursor:pointer;">'+(mk==='new'?'🆕 naya PO':'🔗 match')+'</div>':'')+'</td>'+
           '<td class="po-span" rowspan="'+nL+'">'+fmtDate(o.poDate)+'</td>'+
           '<td class="po-span" rowspan="'+nL+'">'+H(o.item)+'</td>'+
           '<td class="po-span" rowspan="'+nL+'">'+H(o.tone)+'</td>'+
@@ -4367,7 +4434,12 @@ function saveModal(){
       corePipePO:(existing&&existing.corePipePO)||0, diffPO:(existing&&existing.diffPO)||0 });
     dbSave(true); renderAll(); showToast('✓ Production Order saved — PO '+po);
     if(wasNew){
-      // naya tha — agla PO ke liye form reset (popup khula rahega)
+      // naya PO — match check karo (same Item + same GSM) aur turant highlight
+      setNewPoId(_oid);
+      var _mm=poMatchList(_oid);
+      renderProdOrders();
+      if(_mm.length) showMatchAlert(po, _mm);
+      // agla PO ke liye form reset (popup khula rahega)
       editCtx.id=null;
       POL=[ blankLine() ];
       S('m-poNo', genPO());
