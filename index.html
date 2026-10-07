@@ -1111,6 +1111,7 @@ function _fbDeleteRev(base, rev, n){
     <button class="tab" onclick="goTab(14)">📖 Cutting Register</button>
     <button class="tab active" onclick="goTab(0)">🛒 Purchase</button>
     <button class="tab" onclick="goTab(1)">📦 Inventory</button>
+    <button class="tab" onclick="goTab(15)">📐 Size Report</button>
     <button class="tab" onclick="goTab(2)">📋 Production Order</button>
     <button class="tab" onclick="goTab(3)">✂ Cutting Entry</button>
     <button class="tab" onclick="goTab(5)">📊 Report</button>
@@ -1457,6 +1458,52 @@ function _fbDeleteRev(base, rev, n){
         <td class="num" id="if-wt">0</td><td class="col-sep num" style="color:#7c3aed;" id="if-used">0</td>
         <td class="num" style="color:#c2410c;" id="if-oq">0</td>
         <td class="num" style="color:#1a6b3c;" id="if-bal">0</td><td colspan="4"></td>
+      </tr></tfoot></table>
+    </div>
+  </div>
+</div>
+
+<!-- PANEL 15: SIZE + GSM WISE REPORT — sirf dekhne ke liye (koi edit/delete nahi) -->
+<div class="panel" id="p15">
+  <div class="metrics" id="sz-met"></div>
+  <div class="card">
+    <div class="card-head">
+      📐 Size + GSM wise Stock
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span id="sz-count" class="filter-count"></span>
+      </div>
+    </div>
+    <div class="filter-bar no-print">
+      <span class="filter-label">🔍 Filter:</span>
+      <input id="f-sz-search" placeholder="Reel No / Bill / Supplier / Product..." style="width:220px;" oninput="renderSizeReport()"/>
+      <select id="f-sz-sup" onchange="renderSizeReport()"><option value="">Sabhi Supplier</option></select>
+      <select id="f-sz-prod" onchange="renderSizeReport()"><option value="">Sabhi Product</option></select>
+      <select id="f-sz-div" onchange="renderSizeReport()"><option value="">Sabhi Division</option></select>
+      <select id="f-sz-tone" onchange="renderSizeReport()"><option value="">Sabhi Tone</option></select>
+      <select id="f-sz-size" onchange="renderSizeReport()"><option value="">Sabhi Size</option></select>
+      <select id="f-sz-gsm" onchange="renderSizeReport()"><option value="">Sabhi GSM</option></select>
+      <select id="f-sz-status" onchange="renderSizeReport()"><option value="">Sabhi Status</option><option selected>In Stock</option><option>Ordered</option><option>In Use</option><option>Finished</option></select>
+      <button class="f-clear" onclick="['f-sz-search','f-sz-sup','f-sz-prod','f-sz-div','f-sz-tone','f-sz-size','f-sz-gsm','f-sz-status'].forEach(function(i){var e=document.getElementById(i); if(e) e.value='';});renderSizeReport()">✕ Clear</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="autofilter" id="sz-table"><thead><tr>
+        <th>Size (Width)</th><th>GSM</th>
+        <th>Supplier</th><th>Product</th><th>Division</th><th>Tone/Shade</th>
+        <th class="num">Reels</th>
+        <th class="num">Weight (kg)</th><th class="col-sep num" style="color:#7c3aed;">Used (kg)</th>
+        <th class="num" style="color:#c2410c;">Order Qty (kg)</th>
+        <th class="num" style="color:#1a6b3c;">Balance (kg)</th>
+        <th>📍 Location</th>
+      </tr></thead>
+      <tbody id="sz-sum-body"></tbody>
+      <tfoot><tr style="background:#e6f4ec;font-weight:bold;border-top:2px solid #1a6b3c;font-family:monospace;">
+        <td colspan="6" style="text-align:right;padding:8px;color:#1a6b3c;">📊 TOTAL:</td>
+        <td class="num" id="szf-reels">0</td>
+        <td class="num" id="szf-wt">0</td>
+        <td class="col-sep num" style="color:#7c3aed;" id="szf-used">0</td>
+        <td class="num" style="color:#c2410c;" id="szf-oq">0</td>
+        <td class="num" style="color:#1a6b3c;" id="szf-bal">0</td>
+        <td></td>
       </tr></tfoot></table>
     </div>
   </div>
@@ -1946,6 +1993,7 @@ function goTab(n){
   if(n===12){ renderBalanceReport(); }
   if(n===13){ renderCuttingBill(); }
   if(n===14){ renderCuttingRegister(); }
+  if(n===15){ renderSizeReport(); }
   setTimeout(function(){ if(window.attachTableFilters) attachTableFilters(); }, 30);
 }
 
@@ -2559,6 +2607,159 @@ function renderInv(){
   document.getElementById('inv-met').innerHTML=
     met(cnt,'Total Reels')+met(N(tw)+' kg','Total Weight')+met(N(tb)+' kg','Balance Stock')+
     met(inStockCnt,'In Stock')+met(N(tu)+' kg','Used in Cutting')+met(N(tds)+' kg','Direct Sale');
+}
+
+// ═══════════════════════════════════════════
+// RENDER: SIZE + GSM WISE REPORT  (sirf dekhne ke liye)
+//   Inventory ka hi data — Sale Challan aur Action column ke bina.
+//   Upar Size+GSM wise total (Balance), neeche reel-wise detail.
+//   Yahan koi edit/delete button nahi — factory ID sirf filter kar sakti hai.
+// ═══════════════════════════════════════════
+function renderSizeReport(){
+  var sum=document.getElementById('sz-sum-body'); if(!sum) return;
+  var srch=(G('f-sz-search')||'').toLowerCase(), divF=G('f-sz-div'),
+      supF=G('f-sz-sup'), prodF=G('f-sz-prod'), toneF=G('f-sz-tone'),
+      sizeF=G('f-sz-size'), gsmF=G('f-sz-gsm'), stF=G('f-sz-status');
+
+  // ── dropdowns bharo (jo value chuni hai wo bani rahe) ──
+  var RIX=buildReelIndex();
+  var allDiv={}, allSize={}, allGsm={}, allSup={}, allProd={}, allTone={};
+  DB.reels.forEach(function(r){
+    if(!isValidReel(r) || !upToFY(r.din)) return;
+    if(r.mat) allDiv[r.mat]=1;
+    if(r.sup) allSup[r.sup]=1;
+    if(r.product) allProd[r.product]=1;
+    if(r.tone) allTone[r.tone]=1;
+    var sz=szLabel(r); if(sz) allSize[sz]=szSortVal(r);
+    var g=parseFloat(r.gsm)||0; if(g) allGsm[g]=1;
+  });
+  fillSel('f-sz-sup',  Object.keys(allSup).sort(),  'Sabhi Supplier');
+  fillSel('f-sz-prod', Object.keys(allProd).sort(), 'Sabhi Product');
+  fillSel('f-sz-div',  Object.keys(allDiv).sort(),  'Sabhi Division');
+  fillSel('f-sz-tone', Object.keys(allTone).sort(), 'Sabhi Tone');
+  fillSel('f-sz-size', Object.keys(allSize).sort(function(a,b){ return allSize[a]-allSize[b]; }), 'Sabhi Size');
+  fillSel('f-sz-gsm',  Object.keys(allGsm).sort(function(a,b){ return parseFloat(a)-parseFloat(b); }), 'Sabhi GSM');
+
+  // ── size => uske andar gsm => total ──
+  var sizes={}, tw=0,tu=0,toq=0,tb=0,cnt=0;
+  DB.reels.forEach(function(r){
+    if(!isValidReel(r)) return;
+    if(!upToFY(r.din)) return;
+    var hay=((r.rno||'')+' '+(r.bill||'')+' '+(r.sup||'')+' '+(r.product||'')+' '+(r.mat||'')).toLowerCase();
+    if(srch && hay.indexOf(srch)<0) return;
+    if(divF && r.mat!==divF) return;
+    if(supF && r.sup!==supF) return;
+    if(prodF && r.product!==prodF) return;
+    if(toneF && r.tone!==toneF) return;
+    if(sizeF && szLabel(r)!==sizeF) return;
+    if(gsmF && String(parseFloat(r.gsm)||0)!==String(gsmF)) return;
+    var used=RIX.used(r), wt=parseFloat(r.wt)||0, bal=round(wt-used,2);
+    if(bal<=0.5 && !inFY(r.din)) return;
+    var ordQty=RIX.orderQty(r), cutQty=RIX.cutQtyFY(r);
+    var status=bal<=0.5?'Finished':(used>0?'In Use':(ordQty>0?'Ordered':'In Stock'));
+    if(stF && status!==stF) return;
+
+    tw+=wt; tu+=cutQty; toq+=ordQty; tb+=bal; cnt++;
+    var slab=szLabel(r)||'-', g=parseFloat(r.gsm)||0;
+    var S=sizes[slab];
+    if(!S){ S=sizes[slab]={ label:slab, sort:szSortVal(r), gsms:{}, reels:0, wt:0, used:0, oq:0, bal:0 }; }
+    S.reels++; S.wt+=wt; S.used+=cutQty; S.oq+=ordQty; S.bal+=bal;
+    var Gg=S.gsms[g];
+    if(!Gg){ Gg=S.gsms[g]={ gsm:g, reels:0, wt:0, used:0, oq:0, bal:0, locs:{}, sups:{}, prods:{}, divs:{}, tones:{} }; }
+    Gg.reels++; Gg.wt+=wt; Gg.used+=cutQty; Gg.oq+=ordQty; Gg.bal+=bal;
+    if(r.loc) Gg.locs[r.loc]=1;
+    if(r.sup) Gg.sups[r.sup]=1;
+    if(r.product) Gg.prods[r.product]=1;
+    if(r.mat) Gg.divs[r.mat]=1;
+    if(r.tone) Gg.tones[r.tone]=1;
+  });
+
+  // ek group me kai supplier/product ho to sab dikhao (zyada hon to "+N")
+  function many(obj, max){
+    var k=Object.keys(obj); if(!k.length) return '-';
+    max=max||3;
+    return H(k.slice(0,max).join(', '))+(k.length>max?' <span style="color:#999;">+'+(k.length-max)+'</span>':'');
+  }
+
+  // ── table: har row me size hota hai (filter ke liye) par DIKHTA ek hi baar.
+  //    Pehle rowspan tha — par filter row chhupata hai aur merged cell gayab hote hi
+  //    baaki columns khisak jaate the. Isliye ab har row ka apna cell, aur repeat
+  //    rows me label chhupa dete hain (text andar rehta hai, filter use dekh leta hai).
+  var list=Object.keys(sizes).map(function(k){ return sizes[k]; }).sort(function(a,b){ return a.sort-b.sort; });
+  var html='', nGsm=0;
+  list.forEach(function(S){
+    var gl=Object.keys(S.gsms).map(function(k){ return S.gsms[k]; }).sort(function(a,b){ return a.gsm-b.gsm; });
+    nGsm+=gl.length;
+    gl.forEach(function(g){
+      var locs=Object.keys(g.locs);
+      var locTxt=locs.slice(0,8).join(', ')+(locs.length>8?' +'+(locs.length-8):'');
+      html+='<tr>'+
+        '<td class="szsz" data-sz="'+H(S.label)+'" style="font-weight:bold;color:#1a4f8a;font-family:monospace;'+
+          'font-size:15px;background:#f4f8ff;white-space:nowrap;">'+H(S.label)+'</td>'+
+        '<td style="font-weight:bold;font-family:monospace;">'+g.gsm+'</td>'+
+        '<td style="font-size:11px;">'+many(g.sups)+'</td>'+
+        '<td style="font-size:11px;color:#0891b2;font-weight:bold;">'+many(g.prods)+'</td>'+
+        '<td style="font-size:11px;">'+many(g.divs,2)+'</td>'+
+        '<td style="font-size:11px;">'+many(g.tones,2)+'</td>'+
+        '<td class="num">'+g.reels+'</td>'+
+        '<td class="num">'+N(g.wt)+'</td>'+
+        '<td class="col-sep num" style="color:#7c3aed;">'+N(g.used)+'</td>'+
+        '<td class="num" style="color:#c2410c;">'+(g.oq>0?N(g.oq):'-')+'</td>'+
+        '<td class="num" style="color:#1a6b3c;font-weight:bold;font-size:14px;">'+N(g.bal)+'</td>'+
+        '<td style="color:#7c3aed;font-size:11px;">'+H(locTxt||'-')+'</td></tr>';
+    });
+  });
+    sum.innerHTML=html||'<tr><td colspan="12" style="text-align:center;padding:20px;color:#999;">Is filter me koi stock nahi.</td></tr>';
+
+  S2('szf-reels',cnt); S2('szf-wt',N(tw)); S2('szf-used',N(tu)); S2('szf-oq',N(toq)); S2('szf-bal',N(tb));
+  szRefresh();
+}
+
+// Size label sirf apne group ki PEHLI DIKHNE WALI row pe — aur upar ke
+// metrics/counter bhi sirf dikhne wali rows ka total dikhayein (header ▼ filter ke baad bhi sahi).
+function szRefresh(){
+  var tb=document.getElementById('sz-sum-body'); if(!tb) return;
+  var prev=null, sizes={}, reels=0, wt=0, used=0, oq=0, bal=0, rows=0;
+  Array.prototype.forEach.call(tb.rows, function(tr){
+    var c=tr.cells[0]; if(!c || !c.classList.contains('szsz')) return;
+    if(tr.style.display==='none'){ return; }
+    var sz=c.getAttribute('data-sz')||'';
+    var same=(sz===prev);
+    c.style.color = same ? 'transparent' : '#1a4f8a';     // text rehta hai (filter ke liye), dikhta nahi
+    tr.style.borderTop = same ? '' : '2px solid #1a4f8a';
+    prev=sz;
+    sizes[sz]=1; rows++;
+    var num=function(i){ var v=parseFloat((tr.cells[i].textContent||'').replace(/,/g,'')); return isNaN(v)?0:v; };
+    reels+=num(6); wt+=num(7); used+=num(8); oq+=num(9); bal+=num(10);
+  });
+  S2('sz-count', Object.keys(sizes).length+' size / '+rows+' gsm');
+  var m=document.getElementById('sz-met');
+  if(m) m.innerHTML=met(Object.keys(sizes).length,'Size')+met(reels,'Reels')+met(N(wt)+' kg','Total Weight')+
+                    met(N(bal)+' kg','Balance Stock')+met(N(oq)+' kg','Order Qty (pending)');
+}
+// header ▼ filter lagne ke baad bhi label/total theek rahe
+var _applyTblRowFilter_orig = applyTblRowFilter;
+applyTblRowFilter = function(tbl){
+  _applyTblRowFilter_orig(tbl);
+  if(tbl && tbl.id==='sz-table') szRefresh();
+};
+
+// size ka label — apne hi unit me (jaise "45.5 inch" ya "115.57 cm")
+function szLabel(r){
+  if(!r || r.w===undefined || r.w==='' || r.w===null) return '';
+  return String(r.w)+' '+unitFull(r.wunit);   // escape use karne ki jagah hota hai
+}
+// sort ke liye sab cm me (mixed unit bhi sahi order me aayein)
+function szSortVal(r){
+  var w=parseFloat(r&&r.w)||0;
+  return unitFull(r&&r.wunit)==='inch' ? w*2.54 : w;
+}
+function S2(id,v){ var e=document.getElementById(id); if(e) e.textContent=v; }
+function fillSel(id, vals, allLabel){
+  var el=document.getElementById(id); if(!el) return;
+  var cur=el.value;
+  el.innerHTML='<option value="">'+allLabel+'</option>'+vals.map(function(v){ return '<option>'+H(v)+'</option>'; }).join('');
+  el.value=cur;
 }
 
 // ═══════════════════════════════════════════
@@ -6431,6 +6632,7 @@ function renderAll(){
   if(document.getElementById('bal-body')) renderBalanceReport();
   if(document.getElementById('rep-cbill-body')) renderCuttingBill();
   if(document.getElementById('cr-body')) renderCuttingRegister();
+  if(document.getElementById('sz-sum-body')) renderSizeReport();
   setTimeout(function(){ attachTableFilters(); }, 50);
 }
 renderAll();
