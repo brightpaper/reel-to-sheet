@@ -1488,12 +1488,12 @@ function _fbDeleteRev(base, rev, n){
     <div class="tbl-wrap">
       <table class="autofilter" id="sz-table"><thead><tr>
         <th>Size (Width)</th><th>GSM</th>
-        <th>Supplier</th><th>Product</th><th>Division</th><th>Tone/Shade</th>
+        <th data-multi>Supplier</th><th data-multi>Product</th><th data-multi>Division</th><th data-multi>Tone/Shade</th>
         <th class="num">Reels</th>
         <th class="num">Weight (kg)</th><th class="col-sep num" style="color:#7c3aed;">Used (kg)</th>
         <th class="num" style="color:#c2410c;">Order Qty (kg)</th>
         <th class="num" style="color:#1a6b3c;">Balance (kg)</th>
-        <th>📍 Location</th>
+        <th data-multi>📍 Location</th>
       </tr></thead>
       <tbody id="sz-sum-body"></tbody>
       <tfoot><tr style="background:#e6f4ec;font-weight:bold;border-top:2px solid #1a6b3c;font-family:monospace;">
@@ -2621,92 +2621,104 @@ function renderSizeReport(){
       supF=G('f-sz-sup'), prodF=G('f-sz-prod'), toneF=G('f-sz-tone'),
       sizeF=G('f-sz-size'), gsmF=G('f-sz-gsm'), stF=G('f-sz-status');
 
-  // ── dropdowns bharo (jo value chuni hai wo bani rahe) ──
+  // ── pehle har reel ka hisaab (balance, status) nikaalo ──
   var RIX=buildReelIndex();
-  var allDiv={}, allSize={}, allGsm={}, allSup={}, allProd={}, allTone={};
-  DB.reels.forEach(function(r){
-    if(!isValidReel(r) || !upToFY(r.din)) return;
-    if(r.mat) allDiv[r.mat]=1;
-    if(r.sup) allSup[r.sup]=1;
-    if(r.product) allProd[r.product]=1;
-    if(r.tone) allTone[r.tone]=1;
-    var sz=szLabel(r); if(sz) allSize[sz]=szSortVal(r);
-    var g=parseFloat(r.gsm)||0; if(g) allGsm[g]=1;
-  });
-  fillSel('f-sz-sup',  Object.keys(allSup).sort(),  'Sabhi Supplier');
-  fillSel('f-sz-prod', Object.keys(allProd).sort(), 'Sabhi Product');
-  fillSel('f-sz-div',  Object.keys(allDiv).sort(),  'Sabhi Division');
-  fillSel('f-sz-tone', Object.keys(allTone).sort(), 'Sabhi Tone');
-  fillSel('f-sz-size', Object.keys(allSize).sort(function(a,b){ return allSize[a]-allSize[b]; }), 'Sabhi Size');
-  fillSel('f-sz-gsm',  Object.keys(allGsm).sort(function(a,b){ return parseFloat(a)-parseFloat(b); }), 'Sabhi GSM');
-
-  // ── size => uske andar gsm => total ──
-  var sizes={}, tw=0,tu=0,toq=0,tb=0,cnt=0;
+  var rows=[];
   DB.reels.forEach(function(r){
     if(!isValidReel(r)) return;
     if(!upToFY(r.din)) return;
-    var hay=((r.rno||'')+' '+(r.bill||'')+' '+(r.sup||'')+' '+(r.product||'')+' '+(r.mat||'')).toLowerCase();
-    if(srch && hay.indexOf(srch)<0) return;
-    if(divF && r.mat!==divF) return;
-    if(supF && r.sup!==supF) return;
-    if(prodF && r.product!==prodF) return;
-    if(toneF && r.tone!==toneF) return;
-    if(sizeF && szLabel(r)!==sizeF) return;
-    if(gsmF && String(parseFloat(r.gsm)||0)!==String(gsmF)) return;
     var used=RIX.used(r), wt=parseFloat(r.wt)||0, bal=round(wt-used,2);
-    if(bal<=0.5 && !inFY(r.din)) return;
+    if(bal<=0.5 && !inFY(r.din)) return;              // pichle saal ki khatam reel aage nahi aati
     var ordQty=RIX.orderQty(r), cutQty=RIX.cutQtyFY(r);
-    var status=bal<=0.5?'Finished':(used>0?'In Use':(ordQty>0?'Ordered':'In Stock'));
-    if(stF && status!==stF) return;
-
-    tw+=wt; tu+=cutQty; toq+=ordQty; tb+=bal; cnt++;
-    var slab=szLabel(r)||'-', g=parseFloat(r.gsm)||0;
-    var S=sizes[slab];
-    if(!S){ S=sizes[slab]={ label:slab, sort:szSortVal(r), gsms:{}, reels:0, wt:0, used:0, oq:0, bal:0 }; }
-    S.reels++; S.wt+=wt; S.used+=cutQty; S.oq+=ordQty; S.bal+=bal;
-    var Gg=S.gsms[g];
-    if(!Gg){ Gg=S.gsms[g]={ gsm:g, reels:0, wt:0, used:0, oq:0, bal:0, locs:{}, sups:{}, prods:{}, divs:{}, tones:{} }; }
-    Gg.reels++; Gg.wt+=wt; Gg.used+=cutQty; Gg.oq+=ordQty; Gg.bal+=bal;
-    if(r.loc) Gg.locs[r.loc]=1;
-    if(r.sup) Gg.sups[r.sup]=1;
-    if(r.product) Gg.prods[r.product]=1;
-    if(r.mat) Gg.divs[r.mat]=1;
-    if(r.tone) Gg.tones[r.tone]=1;
+    rows.push({ r:r, wt:wt, used:used, bal:bal, oq:ordQty, cut:cutQty,
+      status: bal<=0.5?'Finished':(used>0?'In Use':(ordQty>0?'Ordered':'In Stock')),
+      sz: szLabel(r)||'-', szs: szSortVal(r), gsm: parseFloat(r.gsm)||0 });
   });
 
-  // ek group me kai supplier/product ho to sab dikhao (zyada hon to "+N")
-  function many(obj, max){
-    var k=Object.keys(obj); if(!k.length) return '-';
-    max=max||3;
-    return H(k.slice(0,max).join(', '))+(k.length>max?' <span style="color:#999;">+'+(k.length-max)+'</span>':'');
+  // ── filter check. skip = jis filter ko chhodna hai (uska apna dropdown banate waqt) ──
+  function ok(x, skip){
+    var r=x.r;
+    if(skip!=='q' && srch){
+      var hay=((r.rno||'')+' '+(r.bill||'')+' '+(r.sup||'')+' '+(r.product||'')+' '+(r.mat||'')).toLowerCase();
+      if(hay.indexOf(srch)<0) return false;
+    }
+    if(skip!=='sup'  && supF  && r.sup!==supF) return false;
+    if(skip!=='prod' && prodF && r.product!==prodF) return false;
+    if(skip!=='div'  && divF  && r.mat!==divF) return false;
+    if(skip!=='tone' && toneF && r.tone!==toneF) return false;
+    if(skip!=='size' && sizeF && x.sz!==sizeF) return false;
+    if(skip!=='gsm'  && gsmF  && String(x.gsm)!==String(gsmF)) return false;
+    if(skip!=='st'   && stF   && x.status!==stF) return false;
+    return true;
+  }
+  // har dropdown me sirf wahi values jo BAAKI filters ke baad bachti hain
+  // (jaise Inventory ke ▼ filter me — jo screen pe hai wahi list me)
+  function opts(skip, pick){
+    var set={};
+    rows.forEach(function(x){ if(!ok(x,skip)) return; var v=pick(x); if(v!==''&&v!=null) set[v]=1; });
+    return Object.keys(set);
+  }
+  fillSel('f-sz-sup',  opts('sup', function(x){ return x.r.sup||''; }).sort(),      'Sabhi Supplier');
+  fillSel('f-sz-prod', opts('prod',function(x){ return x.r.product||''; }).sort(),  'Sabhi Product');
+  fillSel('f-sz-div',  opts('div', function(x){ return x.r.mat||''; }).sort(),      'Sabhi Division');
+  fillSel('f-sz-tone', opts('tone',function(x){ return x.r.tone||''; }).sort(),     'Sabhi Tone');
+  var szOrder={};
+  rows.forEach(function(x){ szOrder[x.sz]=x.szs; });
+  fillSel('f-sz-size', opts('size',function(x){ return x.sz; }).sort(function(a,b){ return szOrder[a]-szOrder[b]; }), 'Sabhi Size');
+  fillSel('f-sz-gsm',  opts('gsm', function(x){ return x.gsm||''; }).sort(function(a,b){ return parseFloat(a)-parseFloat(b); }), 'Sabhi GSM');
+
+  // ── group = Size + GSM + Product + Division + Tone ──
+  //    (pehle sirf size+gsm tha — tab COMMERCIAL/NATURAL aur COMMERCIAL/BLUE ek me
+  //     mil jaate the aur alag-alag qty pata nahi chalti thi)
+  var sizes={}, tw=0,tu=0,toq=0,tb=0,cnt=0;
+  rows.forEach(function(x){
+    if(!ok(x,null)) return;
+    var r=x.r;
+    tw+=x.wt; tu+=x.cut; toq+=x.oq; tb+=x.bal; cnt++;
+    var S=sizes[x.sz];
+    if(!S){ S=sizes[x.sz]={ label:x.sz, sort:x.szs, grp:{}, reels:0, wt:0, used:0, oq:0, bal:0 }; }
+    S.reels++; S.wt+=x.wt; S.used+=x.cut; S.oq+=x.oq; S.bal+=x.bal;
+    var prod=(r.product||'-'), div=(r.mat||'-'), tone=(r.tone||'-');
+    var k=x.gsm+'||'+prod+'||'+div+'||'+tone;
+    var Gg=S.grp[k];
+    if(!Gg){ Gg=S.grp[k]={ gsm:x.gsm, prod:prod, div:div, tone:tone,
+                           reels:0, wt:0, used:0, oq:0, bal:0, locs:{}, sups:{} }; }
+    Gg.reels++; Gg.wt+=x.wt; Gg.used+=x.cut; Gg.oq+=x.oq; Gg.bal+=x.bal;
+    if(r.loc) Gg.locs[r.loc]=1;
+    if(r.sup) Gg.sups[r.sup]=1;
+  });
+
+  // supplier/location me kai values ho sakti hain — dikhane ko chhota text,
+  // data-vals me poori list (column ka ▼ filter isi ko padhta hai)
+  function multiCell(obj, max, style){
+    var k=Object.keys(obj).sort();
+    var txt=k.length? (H(k.slice(0,max).join(', '))+(k.length>max?' <span style="color:#999;">+'+(k.length-max)+'</span>':'')) : '-';
+    return '<td data-vals="'+H(k.join('|')).replace(/"/g,'&quot;')+'" style="'+style+'">'+txt+'</td>';
   }
 
-  // ── table: har row me size hota hai (filter ke liye) par DIKHTA ek hi baar.
-  //    Pehle rowspan tha — par filter row chhupata hai aur merged cell gayab hote hi
-  //    baaki columns khisak jaate the. Isliye ab har row ka apna cell, aur repeat
-  //    rows me label chhupa dete hain (text andar rehta hai, filter use dekh leta hai).
+  // ── table: size ek hi baar dikhta hai (text har row me rehta hai — filter ke liye) ──
   var list=Object.keys(sizes).map(function(k){ return sizes[k]; }).sort(function(a,b){ return a.sort-b.sort; });
-  var html='', nGsm=0;
+  var html='', nGrp=0;
   list.forEach(function(S){
-    var gl=Object.keys(S.gsms).map(function(k){ return S.gsms[k]; }).sort(function(a,b){ return a.gsm-b.gsm; });
-    nGsm+=gl.length;
+    var gl=Object.keys(S.grp).map(function(k){ return S.grp[k]; }).sort(function(a,b){
+      return (a.gsm-b.gsm) || a.prod.localeCompare(b.prod) || a.tone.localeCompare(b.tone) || a.div.localeCompare(b.div);
+    });
+    nGrp+=gl.length;
     gl.forEach(function(g){
-      var locs=Object.keys(g.locs);
-      var locTxt=locs.slice(0,8).join(', ')+(locs.length>8?' +'+(locs.length-8):'');
       html+='<tr>'+
         '<td class="szsz" data-sz="'+H(S.label)+'" style="font-weight:bold;color:#1a4f8a;font-family:monospace;'+
           'font-size:15px;background:#f4f8ff;white-space:nowrap;">'+H(S.label)+'</td>'+
-        '<td style="font-weight:bold;font-family:monospace;">'+g.gsm+'</td>'+
-        '<td style="font-size:11px;">'+many(g.sups)+'</td>'+
-        '<td style="font-size:11px;color:#0891b2;font-weight:bold;">'+many(g.prods)+'</td>'+
-        '<td style="font-size:11px;">'+many(g.divs,2)+'</td>'+
-        '<td style="font-size:11px;">'+many(g.tones,2)+'</td>'+
+        '<td class="szgsm" data-gsm="'+H(String(g.gsm))+'" style="font-weight:bold;font-family:monospace;">'+g.gsm+'</td>'+
+        multiCell(g.sups, 3, 'font-size:11px;')+
+        '<td style="font-size:11px;color:#0891b2;font-weight:bold;">'+H(g.prod)+'</td>'+
+        '<td style="font-size:11px;">'+H(g.div)+'</td>'+
+        '<td style="font-size:11px;font-weight:bold;">'+H(g.tone)+'</td>'+
         '<td class="num">'+g.reels+'</td>'+
         '<td class="num">'+N(g.wt)+'</td>'+
         '<td class="col-sep num" style="color:#7c3aed;">'+N(g.used)+'</td>'+
         '<td class="num" style="color:#c2410c;">'+(g.oq>0?N(g.oq):'-')+'</td>'+
         '<td class="num" style="color:#1a6b3c;font-weight:bold;font-size:14px;">'+N(g.bal)+'</td>'+
-        '<td style="color:#7c3aed;font-size:11px;">'+H(locTxt||'-')+'</td></tr>';
+        multiCell(g.locs, 8, 'color:#7c3aed;font-size:11px;')+'</tr>';
     });
   });
     sum.innerHTML=html||'<tr><td colspan="12" style="text-align:center;padding:20px;color:#999;">Is filter me koi stock nahi.</td></tr>';
@@ -2719,7 +2731,7 @@ function renderSizeReport(){
 // metrics/counter bhi sirf dikhne wali rows ka total dikhayein (header ▼ filter ke baad bhi sahi).
 function szRefresh(){
   var tb=document.getElementById('sz-sum-body'); if(!tb) return;
-  var prev=null, sizes={}, reels=0, wt=0, used=0, oq=0, bal=0, rows=0;
+  var prev=null, prevG=null, sizes={}, reels=0, wt=0, used=0, oq=0, bal=0, rows=0;
   Array.prototype.forEach.call(tb.rows, function(tr){
     var c=tr.cells[0]; if(!c || !c.classList.contains('szsz')) return;
     if(tr.style.display==='none'){ return; }
@@ -2727,12 +2739,19 @@ function szRefresh(){
     var same=(sz===prev);
     c.style.color = same ? 'transparent' : '#1a4f8a';     // text rehta hai (filter ke liye), dikhta nahi
     tr.style.borderTop = same ? '' : '2px solid #1a4f8a';
+    // GSM bhi tabhi dikhe jab badli ho (ek hi size ke andar)
+    var gc=tr.cells[1];
+    if(gc && gc.classList.contains('szgsm')){
+      var gv=gc.getAttribute('data-gsm')||'';
+      gc.style.color=(same && gv===prevG) ? 'transparent' : '';
+      prevG=gv;
+    }
     prev=sz;
     sizes[sz]=1; rows++;
     var num=function(i){ var v=parseFloat((tr.cells[i].textContent||'').replace(/,/g,'')); return isNaN(v)?0:v; };
     reels+=num(6); wt+=num(7); used+=num(8); oq+=num(9); bal+=num(10);
   });
-  S2('sz-count', Object.keys(sizes).length+' size / '+rows+' gsm');
+  S2('sz-count', Object.keys(sizes).length+' size / '+rows+' line');
   var m=document.getElementById('sz-met');
   if(m) m.innerHTML=met(Object.keys(sizes).length,'Size')+met(reels,'Reels')+met(N(wt)+' kg','Total Weight')+
                     met(N(bal)+' kg','Balance Stock')+met(N(oq)+' kg','Order Qty (pending)');
@@ -5784,7 +5803,10 @@ function buildGrid(tbl){
     for(var col=0; cellIdx<tr.cells.length; col++){
       if(line.hasOwnProperty(col)) continue; // rowspan se bhara hua
       var cell=tr.cells[cellIdx++];
-      var txt=(cell.textContent||'').trim();
+      // data-vals = is cell ki ASLI value list ("BLUE|NATURAL") — filter isi ko dekhta hai.
+      // (dikhne me "BLUE, NATURAL +2" ho sakta hai, usse filter kharab na ho)
+      var dv=cell.getAttribute('data-vals');
+      var txt=(dv!=null)?dv:(cell.textContent||'').trim();
       var cs=cell.colSpan||1, rs=parseInt(cell.getAttribute('rowspan'))||1;
       for(var x=0; x<cs; x++){
         line[col+x]=txt;
@@ -5796,9 +5818,30 @@ function buildGrid(tbl){
   }
   return {grid:grid, rowEl:rowEl};
 }
+// column multi-value hai? (th pe data-multi) — jaise ek row me "BLUE, NATURAL" dono
+function tblIsMulti(tbl,ci){
+  var hrow=tbl.tHead && tbl.tHead.rows[0]; if(!hrow) return false;
+  var idx=0;
+  for(var i=0;i<hrow.cells.length;i++){
+    var cs=hrow.cells[i].colSpan||1;
+    if(ci>=idx && ci<idx+cs) return hrow.cells[i].getAttribute('data-multi')!=null;
+    idx+=cs;
+  }
+  return false;
+}
+function tblSplitVals(raw){
+  return String(raw==null?'':raw).split('|').map(function(x){ return x.trim(); })
+          .filter(function(x){ return x!==''; });
+}
 function tblColValues(tbl,ci){
-  var set={}; var g=buildGrid(tbl);
+  var set={}; var g=buildGrid(tbl); var multi=tblIsMulti(tbl,ci);
   g.grid.forEach(function(line){ if(!line) return;
+    if(multi){
+      var parts=tblSplitVals(line[ci]);
+      if(!parts.length){ set['(blank)']=1; return; }
+      parts.forEach(function(x){ set[x]=1; });
+      return;
+    }
     var v=(line[ci]==null||line[ci]==='')?'(blank)':String(line[ci]);
     set[v]=1;
   });
@@ -5848,6 +5891,13 @@ function applyTblRowFilter(tbl){
     var show=true;
     Object.keys(cols).forEach(function(ci){
       var sel=cols[ci]; if(!sel) return;
+      if(tblIsMulti(tbl,ci)){
+        // multi column: row ki kisi ek value bhi select ho to row dikhegi
+        var parts=tblSplitVals(line[ci]);
+        if(!parts.length) parts=['(blank)'];
+        if(!parts.some(function(x){ return sel[x]; })) show=false;
+        return;
+      }
       var v=(line[ci]==null||line[ci]==='')?'(blank)':String(line[ci]);
       if(!sel[v]) show=false;
     });
