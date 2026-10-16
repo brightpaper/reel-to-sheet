@@ -5068,19 +5068,19 @@ function printManualSticker(){
   });
   var w=window.open('','_blank');
   w.document.write('<html><head><title>Manual Stickers</title><style>'+
-    '@page{size:4in 6in;margin:0;}'+
+    '@page{size:2in 4in;margin:0;}'+
     '*{box-sizing:border-box;}'+
     'body{margin:0;font-family:Arial,sans-serif;}'+
-    '.stk{width:4in;height:6in;padding:0.3in 0.28in;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
+    '.stk{width:2in;height:4in;padding:0.12in 0.12in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
     '.stk:last-child{page-break-after:auto;}'+
-    '.brand{text-align:center;font-size:22pt;font-weight:bold;letter-spacing:3px;'+
-      'border-bottom:3px solid #000;padding-bottom:6px;margin-bottom:10px;}'+
-    '.tag{font-size:16pt;font-weight:bold;letter-spacing:2px;border:2px solid #000;display:inline-block;padding:2px 12px;}'+
-    '.item{font-size:30pt;font-weight:bold;line-height:1.08;margin:14px 0 6px;}'+
-    '.row{display:flex;justify-content:space-between;font-size:17pt;padding:7px 0;border-bottom:1px solid #999;}'+
-    '.row b{font-size:18pt;}'+
-    '.big{font-size:26pt;font-weight:bold;}'+
-    '.ft{display:flex;justify-content:space-between;font-size:13pt;padding-top:6px;border-top:2px solid #000;}'+
+    '.brand{text-align:center;font-size:11pt;font-weight:bold;letter-spacing:1px;'+
+      'border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:4px;}'+
+    '.tag{font-size:8pt;font-weight:bold;letter-spacing:1px;border:1px solid #000;display:inline-block;padding:1px 6px;}'+
+    '.item{font-size:15pt;font-weight:bold;line-height:1.08;margin:5px 0 3px;}'+
+    '.row{display:flex;justify-content:space-between;gap:4px;font-size:9pt;padding:3px 0;border-bottom:1px solid #999;}'+
+    '.row b{font-size:10pt;text-align:right;}'+
+    '.big{font-size:13pt;font-weight:bold;}'+
+    '.ft{display:flex;justify-content:space-between;gap:4px;font-size:7pt;padding-top:3px;border-top:1px solid #000;}'+
     '@media print{.noprint{display:none;}}'+
     '</style></head><body>'+
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
@@ -5156,17 +5156,17 @@ function printStickers(id){
   if(!blocks.length){ showToast('Koi finished sheet nahi — pehle packing entry karo',true); return; }
   var w=window.open('','_blank');
   w.document.write('<html><head><title>Stickers PO '+H(o.poNo)+'</title><style>'+
-    '@page{size:4in 6in;margin:0;}'+
+    '@page{size:2in 4in;margin:0;}'+
     '*{box-sizing:border-box;}'+
     'body{margin:0;font-family:Arial,sans-serif;}'+
-    '.stk{width:4in;height:6in;padding:0.3in 0.28in;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
+    '.stk{width:2in;height:4in;padding:0.12in 0.12in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
     '.stk:last-child{page-break-after:auto;}'+
-    '.tag{font-size:16pt;font-weight:bold;letter-spacing:2px;border:2px solid #000;display:inline-block;padding:2px 12px;}'+
-    '.item{font-size:30pt;font-weight:bold;line-height:1.08;margin:14px 0 6px;}'+
-    '.row{display:flex;justify-content:space-between;font-size:17pt;padding:7px 0;border-bottom:1px solid #999;}'+
-    '.row b{font-size:18pt;}'+
-    '.big{font-size:26pt;font-weight:bold;}'+
-    '.ft{display:flex;justify-content:space-between;font-size:13pt;padding-top:6px;border-top:2px solid #000;}'+
+    '.tag{font-size:8pt;font-weight:bold;letter-spacing:1px;border:1px solid #000;display:inline-block;padding:1px 6px;}'+
+    '.item{font-size:15pt;font-weight:bold;line-height:1.08;margin:5px 0 3px;}'+
+    '.row{display:flex;justify-content:space-between;gap:4px;font-size:9pt;padding:3px 0;border-bottom:1px solid #999;}'+
+    '.row b{font-size:10pt;text-align:right;}'+
+    '.big{font-size:13pt;font-weight:bold;}'+
+    '.ft{display:flex;justify-content:space-between;gap:4px;font-size:7pt;padding-top:3px;border-top:1px solid #000;}'+
     '@media print{.noprint{display:none;}}'+
     '</style></head><body>'+
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
@@ -5185,7 +5185,7 @@ function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
       (info.heading ? '<div class="brand">'+H(info.heading)+'</div>' : '')+
       '<div style="display:flex;justify-content:space-between;align-items:center;">'+
         '<span class="tag">'+kind+'</span>'+
-        '<span style="font-size:15pt;font-weight:bold;">'+num+' / '+total+'</span>'+
+        '<span style="font-size:8pt;font-weight:bold;">'+num+' / '+total+'</span>'+
       '</div>'+
       (info.manual ? '' : '<div class="item">'+H(info.item||'-')+'</div>')+
     '</div>'+
