@@ -5157,7 +5157,7 @@ function printStickers(id){
 }
 // Sticker label: 4in chauda x 2in lamba (landscape) — details 2 column me
 var STICKER_CSS =
-    '@page{size:4in 2in;margin:0;}'+
+    '@page{margin:0;}'+          // size nahi diya — Chrome Landscape force na kare, printer ka 4x2 paper hi use ho
     '*{box-sizing:border-box;}'+
     'body{margin:0;font-family:Arial,sans-serif;}'+
     '.stk{width:4in;height:2in;padding:0.1in 0.15in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
