@@ -5068,19 +5068,7 @@ function printManualSticker(){
   });
   var w=window.open('','_blank');
   w.document.write('<html><head><title>Manual Stickers</title><style>'+
-    '@page{size:2in 4in;margin:0;}'+
-    '*{box-sizing:border-box;}'+
-    'body{margin:0;font-family:Arial,sans-serif;}'+
-    '.stk{width:2in;height:4in;padding:0.12in 0.12in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
-    '.stk:last-child{page-break-after:auto;}'+
-    '.brand{text-align:center;font-size:11pt;font-weight:bold;letter-spacing:1px;'+
-      'border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:4px;}'+
-    '.tag{font-size:8pt;font-weight:bold;letter-spacing:1px;border:1px solid #000;display:inline-block;padding:1px 6px;}'+
-    '.item{font-size:15pt;font-weight:bold;line-height:1.08;margin:5px 0 3px;}'+
-    '.row{display:flex;justify-content:space-between;gap:4px;font-size:9pt;padding:3px 0;border-bottom:1px solid #999;}'+
-    '.row b{font-size:10pt;text-align:right;}'+
-    '.big{font-size:13pt;font-weight:bold;}'+
-    '.ft{display:flex;justify-content:space-between;gap:4px;font-size:7pt;padding-top:3px;border-top:1px solid #000;}'+
+    STICKER_CSS+
     '@media print{.noprint{display:none;}}'+
     '</style></head><body>'+
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
@@ -5156,17 +5144,7 @@ function printStickers(id){
   if(!blocks.length){ showToast('Koi finished sheet nahi — pehle packing entry karo',true); return; }
   var w=window.open('','_blank');
   w.document.write('<html><head><title>Stickers PO '+H(o.poNo)+'</title><style>'+
-    '@page{size:2in 4in;margin:0;}'+
-    '*{box-sizing:border-box;}'+
-    'body{margin:0;font-family:Arial,sans-serif;}'+
-    '.stk{width:2in;height:4in;padding:0.12in 0.12in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
-    '.stk:last-child{page-break-after:auto;}'+
-    '.tag{font-size:8pt;font-weight:bold;letter-spacing:1px;border:1px solid #000;display:inline-block;padding:1px 6px;}'+
-    '.item{font-size:15pt;font-weight:bold;line-height:1.08;margin:5px 0 3px;}'+
-    '.row{display:flex;justify-content:space-between;gap:4px;font-size:9pt;padding:3px 0;border-bottom:1px solid #999;}'+
-    '.row b{font-size:10pt;text-align:right;}'+
-    '.big{font-size:13pt;font-weight:bold;}'+
-    '.ft{display:flex;justify-content:space-between;gap:4px;font-size:7pt;padding-top:3px;border-top:1px solid #000;}'+
+    STICKER_CSS+
     '@media print{.noprint{display:none;}}'+
     '</style></head><body>'+
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
@@ -5177,19 +5155,35 @@ function printStickers(id){
     '</body></html>');
   w.document.close();
 }
+// Sticker label: 4in chauda x 2in lamba (landscape) — details 2 column me
+var STICKER_CSS =
+    '@page{size:4in 2in;margin:0;}'+
+    '*{box-sizing:border-box;}'+
+    'body{margin:0;font-family:Arial,sans-serif;}'+
+    '.stk{width:4in;height:2in;padding:0.1in 0.15in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
+    '.stk:last-child{page-break-after:auto;}'+
+    '.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #000;padding-bottom:3px;}'+
+    '.brand{font-size:14pt;font-weight:bold;letter-spacing:2px;}'+
+    '.tag{font-size:9pt;font-weight:bold;letter-spacing:1px;border:1.5px solid #000;display:inline-block;padding:1px 6px;}'+
+    '.item{font-size:14pt;font-weight:bold;line-height:1.08;margin:3px 0 0;}'+
+    '.grid{display:grid;grid-template-columns:1fr 1fr;column-gap:14px;}'+
+    '.row{display:flex;justify-content:space-between;align-items:baseline;gap:4px;font-size:9pt;padding:3px 0;border-bottom:1px solid #999;}'+
+    '.row b{font-size:11pt;text-align:right;}'+
+    '.big{font-size:13pt;font-weight:bold;}'+
+    '.ft{display:flex;justify-content:space-between;gap:4px;font-size:8pt;padding-top:2px;border-top:1.5px solid #000;}';
 function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
   var isB = kind==='BUNDLE';
   var totalSheet = (sheetOverride!==undefined && sheetOverride!==null) ? sheetOverride : round(grossQty*(parseFloat(info.spg)||0),0);
   return '<div class="stk">'+
     '<div>'+
-      (info.heading ? '<div class="brand">'+H(info.heading)+'</div>' : '')+
-      '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+      '<div class="hd">'+        // 2in height — tag, heading, number ek hi line me
         '<span class="tag">'+kind+'</span>'+
-        '<span style="font-size:8pt;font-weight:bold;">'+num+' / '+total+'</span>'+
+        (info.heading ? '<span class="brand">'+H(info.heading)+'</span>' : '')+
+        '<span style="font-size:9pt;font-weight:bold;">'+num+' / '+total+'</span>'+
       '</div>'+
       (info.manual ? '' : '<div class="item">'+H(info.item||'-')+'</div>')+
     '</div>'+
-    '<div>'+
+    '<div class="grid">'+
       (info.manual && info.po ? '<div class="row"><span>PO NO</span><b>'+H(info.po)+'</b></div>' : '')+
       (info.manual ? '<div class="row"><span>QUALITY</span><b>'+H(info.item||'-')+'</b></div>' : '')+
       '<div class="row"><span>SIZE</span><b>'+H(info.size)+'</b></div>'+
@@ -5199,7 +5193,7 @@ function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
       '<div class="row"><span>SHEET / GROSS</span><b>'+info.spg+'</b></div>'+
       (info.manual ? '' : '<div class="row"><span>TOTAL SHEET</span><b>'+N(totalSheet,0)+'</b></div>')+
       (info.date ? '<div class="row"><span>DATE</span><b>'+H(fmtDate(info.date))+'</b></div>' : '')+
-      (isB ? '' : '<div class="row" style="border-bottom:none;"><span>WEIGHT</span><span class="big">'+N(wt,2)+' kg</span></div>')+
+      (isB ? '' : '<div class="row" style="border-bottom:none;grid-column:1/-1;"><span>WEIGHT</span><span class="big">'+N(wt,2)+' kg</span></div>')+
     '</div>'+
     '<div class="ft">'+
       (info.manual ? '<span>'+H(info.party||'')+'</span>'
