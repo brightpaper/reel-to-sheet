@@ -5074,8 +5074,7 @@ function printManualSticker(){
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
       '<b>'+blocks.length+' sticker</b> — '+
       '<button onclick="window.print()" style="padding:6px 14px;font-size:14px;cursor:pointer;">🖨 Print</button>'+
-      ' <button onclick="document.body.classList.toggle(\'ccw\')" style="padding:6px 14px;font-size:14px;cursor:pointer;">⟲ Ulta ghumao</button>'+
-      ' <span style="font-size:12px;">Print setting: Paper <b>2 x 4</b>, Margins <b>None</b>, Headers and footers <b>OFF</b>, Scale <b>Default</b></span>'+
+      ' <span style="font-size:12px;">Print setting: Paper <b>4 x 2</b>, Margins <b>None</b>, Headers and footers <b>OFF</b>, Scale <b>Default</b></span>'+
     '</div>'+
     blocks.join('')+
     '</body></html>');
@@ -5152,27 +5151,22 @@ function printStickers(id){
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
       '<b>'+blocks.length+' sticker</b> (Gross: '+anyGross+' | Bundle: '+anyBundle+') — '+
       '<button onclick="window.print()" style="padding:6px 14px;font-size:14px;cursor:pointer;">🖨 Print</button>'+
-      ' <button onclick="document.body.classList.toggle(\'ccw\')" style="padding:6px 14px;font-size:14px;cursor:pointer;">⟲ Ulta ghumao</button>'+
-      ' <span style="font-size:12px;">Print setting: Paper <b>2 x 4</b>, Margins <b>None</b>, Headers and footers <b>OFF</b>, Scale <b>Default</b></span>'+
+      ' <span style="font-size:12px;">Print setting: Paper <b>4 x 2</b>, Margins <b>None</b>, Headers and footers <b>OFF</b>, Scale <b>Default</b></span>'+
     '</div>'+
     blocks.join('')+
     '</body></html>');
   w.document.close();
 }
 // Sticker label: 4in chauda x 2in lamba — details 2 column me.
-// TSC printer me sirf "2 x 4" paper hai, isliye page 2x4 portrait rakha aur sticker ko
-// page ke andar 90° ghumaya — printer chhapte waqt wapas seedha kar deta hai.
-// Ulta aaye to sticker window me "Ulta ghumao" button (body.ccw = -90°).
+// TSC TE244 page ki width head ke across chhapta hai (khud nahi ghumata), isliye
+// printer driver me "4 x 2" stock (W 4in, H 2in) banana zaroori hai.
+// @page me size nahi diya — warna Chrome Landscape force karta hai.
 var STICKER_CSS =
-    '@page{size:2in 4in;margin:0;}'+
+    '@page{margin:0;}'+
     '*{box-sizing:border-box;}'+
     'body{margin:0;font-family:Arial,sans-serif;}'+
-    '.pg{width:2in;height:4in;position:relative;overflow:hidden;page-break-after:always;}'+
-    '.pg:last-child{page-break-after:auto;}'+
-    '.stk{position:absolute;left:0;top:0;transform-origin:0 0;transform:translateX(2in) rotate(90deg);'+
-      'width:4in;height:2in;padding:0.1in 0.15in;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;}'+
-    'body.ccw .stk{transform:translateY(4in) rotate(-90deg);}'+
-    '@media screen{.pg{outline:1px dashed #bbb;margin:8px;}}'+
+    '.stk{width:4in;height:2in;padding:0.1in 0.15in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
+    '.stk:last-child{page-break-after:auto;}'+
     '.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #000;padding-bottom:3px;}'+
     '.brand{font-size:14pt;font-weight:bold;letter-spacing:2px;}'+
     '.tag{font-size:9pt;font-weight:bold;letter-spacing:1px;border:1.5px solid #000;display:inline-block;padding:1px 6px;}'+
@@ -5185,7 +5179,7 @@ var STICKER_CSS =
 function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
   var isB = kind==='BUNDLE';
   var totalSheet = (sheetOverride!==undefined && sheetOverride!==null) ? sheetOverride : round(grossQty*(parseFloat(info.spg)||0),0);
-  return '<div class="pg"><div class="stk">'+
+  return '<div class="stk">'+
     '<div>'+
       '<div class="hd">'+        // 2in height — tag, heading, number ek hi line me
         '<span class="tag">'+kind+'</span>'+
@@ -5210,7 +5204,7 @@ function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
       (info.manual ? '<span>'+H(info.party||'')+'</span>'
                    : '<span>PO: <b>'+H(info.po)+'</b></span><span>'+H(info.party||'')+'</span><span>Reel: '+H(info.reel)+'</span>')+
     '</div>'+
-  '</div></div>';
+  '</div>';
 }
 function printOrder(id){
   var o=DB.orders.find(function(x){return x.id===id;}); if(!o) return;
