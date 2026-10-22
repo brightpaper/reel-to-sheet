@@ -5000,6 +5000,7 @@ function openManualSticker(){
     '<div class="form-grid-2">'+
       fldSel('Item / Quality','ms-item',msItems(),'')+
       fld('PO No.','text','ms-po','')+
+      fld('📅 Date','date','ms-date',toDay())+
       fld('Size (L×W)  jaise 80x50','text','ms-size','','msPreview()')+
       fld('GSM','number','ms-gsm','','msPreview()')+
       fld('Sheet / Gross','number','ms-spg','100','msPreview()')+
@@ -5052,7 +5053,7 @@ function msPreview(){
 }
 function printManualSticker(){
   var item=G('ms-item').trim(), size=G('ms-size').trim(), gsm=G('ms-gsm').trim();
-  var po=G('ms-po').trim();
+  var po=G('ms-po').trim(), dt=G('ms-date');
   var spg=parseFloat(G('ms-spg'))||100;
   var tg=parseFloat(G('ms-gross'))||0, gpb=parseFloat(G('ms-gpb'))||0;
   var wtGross=msWtGross(), party=G('ms-party').trim();   // wt/gross auto
@@ -5060,22 +5061,33 @@ function printManualSticker(){
   if(gpb<=0){ showToast('Gross/Bundle daalo',true); return; }
   var bun=msBundles(tg,gpb);
   if(!bun.length){ showToast('Sticker nahi bana',true); return; }
-  var info={ item:item, party:party, po:po, size:size, gsm:gsm, reel:'', wtGross:wtGross, spg:spg, manual:true,
+  var info={ item:item, party:party, po:po, date:dt, size:size, gsm:gsm, reel:'', wtGross:wtGross, spg:spg, manual:true,
              heading:'BRIGHT PAPER' };   // sticker ke upar center me chhapega
   var blocks=bun.map(function(x){
     return stickerHTML(info, 'BUNDLE', x.n, x.total, x.gross, round(x.gross*wtGross,2), round(x.gross*spg,0));
   });
   var w=window.open('','_blank');
   w.document.write('<html><head><title>Manual Stickers</title><style>'+
-    STICKER_CSS+
+    '@page{size:4in 6in;margin:0;}'+
+    '*{box-sizing:border-box;}'+
+    'body{margin:0;font-family:Arial,sans-serif;}'+
+    '.stk{width:4in;height:6in;padding:0.3in 0.28in;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
+    '.stk:last-child{page-break-after:auto;}'+
+    '.brand{text-align:center;font-size:22pt;font-weight:bold;letter-spacing:3px;'+
+      'border-bottom:3px solid #000;padding-bottom:6px;margin-bottom:10px;}'+
+    '.tag{font-size:16pt;font-weight:bold;letter-spacing:2px;border:2px solid #000;display:inline-block;padding:2px 12px;}'+
+    '.item{font-size:30pt;font-weight:bold;line-height:1.08;margin:14px 0 6px;}'+
+    '.row{display:flex;justify-content:space-between;font-size:17pt;padding:7px 0;border-bottom:1px solid #999;}'+
+    '.row b{font-size:18pt;}'+
+    '.big{font-size:26pt;font-weight:bold;}'+
+    '.ft{display:flex;justify-content:space-between;font-size:13pt;padding-top:6px;border-top:2px solid #000;}'+
     '@media print{.noprint{display:none;}}'+
     '</style></head><body>'+
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
       '<b>'+blocks.length+' sticker</b> — '+
       '<button onclick="window.print()" style="padding:6px 14px;font-size:14px;cursor:pointer;">🖨 Print</button>'+
-      ' <span style="font-size:12px;">Print setting: Paper <b>4 x 2</b>, Margins <b>None</b>, Headers and footers <b>OFF</b>, Scale <b>Default</b></span>'+
     '</div>'+
-    blocks.join('')+STICKER_FIT+
+    blocks.join('')+
     '</body></html>');
   w.document.close();
   closeModal();
@@ -5144,89 +5156,54 @@ function printStickers(id){
   if(!blocks.length){ showToast('Koi finished sheet nahi — pehle packing entry karo',true); return; }
   var w=window.open('','_blank');
   w.document.write('<html><head><title>Stickers PO '+H(o.poNo)+'</title><style>'+
-    STICKER_CSS+
+    '@page{size:4in 6in;margin:0;}'+
+    '*{box-sizing:border-box;}'+
+    'body{margin:0;font-family:Arial,sans-serif;}'+
+    '.stk{width:4in;height:6in;padding:0.3in 0.28in;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
+    '.stk:last-child{page-break-after:auto;}'+
+    '.tag{font-size:16pt;font-weight:bold;letter-spacing:2px;border:2px solid #000;display:inline-block;padding:2px 12px;}'+
+    '.item{font-size:30pt;font-weight:bold;line-height:1.08;margin:14px 0 6px;}'+
+    '.row{display:flex;justify-content:space-between;font-size:17pt;padding:7px 0;border-bottom:1px solid #999;}'+
+    '.row b{font-size:18pt;}'+
+    '.big{font-size:26pt;font-weight:bold;}'+
+    '.ft{display:flex;justify-content:space-between;font-size:13pt;padding-top:6px;border-top:2px solid #000;}'+
     '@media print{.noprint{display:none;}}'+
     '</style></head><body>'+
     '<div class="noprint" style="padding:8px;font-family:Arial;background:#fef3c7;">'+
       '<b>'+blocks.length+' sticker</b> (Gross: '+anyGross+' | Bundle: '+anyBundle+') — '+
       '<button onclick="window.print()" style="padding:6px 14px;font-size:14px;cursor:pointer;">🖨 Print</button>'+
-      ' <span style="font-size:12px;">Print setting: Paper <b>4 x 2</b>, Margins <b>None</b>, Headers and footers <b>OFF</b>, Scale <b>Default</b></span>'+
     '</div>'+
-    blocks.join('')+STICKER_FIT+
+    blocks.join('')+
     '</body></html>');
   w.document.close();
 }
-// Sticker label: 4in chauda x 2in lamba — details 2 column me.
-// TSC TE244 page ki width head ke across chhapta hai (khud nahi ghumata), isliye
-// printer driver me "4 x 2" stock (W 4in, H 2in) banana zaroori hai.
-// @page me size nahi diya — warna Chrome Landscape force karta hai.
-var STICKER_CSS =
-    '@page{margin:0;}'+
-    '*{box-sizing:border-box;}'+
-    'body{margin:0;font-family:Arial,sans-serif;}'+
-    '.stk{width:4in;height:2in;padding:0.08in 0.15in 0.06in;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;justify-content:space-between;}'+
-    '.stk:last-child{page-break-after:auto;}'+
-    '.hd{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:2px solid #000;padding-bottom:3px;}.hd>span:not(.brand){flex-shrink:0;white-space:nowrap;}'+
-    '.hd b{font-size:11pt;}'+
-    '.brand{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;font-size:22pt;font-weight:bold;letter-spacing:1px;line-height:1.1;}'+
-    '.grid{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:start;}'+  // column 2 sirf jitna chahiye, baaki jagah SIZE/QUALITY ko
-    '.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:8.5pt;padding:1px 0;border-bottom:1px solid #999;}'+
-    '.row b{font-size:10pt;line-height:1.15;text-align:right;white-space:nowrap;}'+
-    '.row.bg{font-size:9pt;padding:3px 0;}.row.bg span{white-space:nowrap;}'+       // SIZE, QUALITY, GSM — value badi
-    '.row.bg b{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;font-size:32pt;line-height:1.05;}'+  // badi value; fit na ho to STICKER_FIT chhota karega
-    '.row.q.stack{display:block;}.row.q.stack span{display:block;}'+     // quality row me na aaye to value neeche wali line me
-    '.row.q.stack b{display:block;white-space:normal;text-align:left;}'+
-    '.ft{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:8pt;padding-top:2px;border-top:1.5px solid #000;}'+
-    '.ft .pty{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;font-size:18pt;font-weight:bold;line-height:1.1;}';  // lamba naam ho to STICKER_FIT chhota karega
-// Print window khulte hi har sticker fit karo:
-//  SIZE / GSM — row me na aaye to font chhota (12pt tak)
-//  QUALITY — row me na aaye to value neeche wali line me (pura font); phir bhi chaudai se
-//            bahar ho to font chhota; height se bahar ho to tabhi chhota jab usse jagah bane
-var STICKER_FIT = '<script>(function(){'+
-  'function pt(b){ return Math.round(parseFloat(getComputedStyle(b).fontSize)*0.75); }'+
-  'function over(s){ return s.scrollHeight>s.clientHeight; }'+
-  'document.querySelectorAll(".stk").forEach(function(s){'+
-    's.querySelectorAll(".row.bg:not(.q) b, .ft .pty, .brand").forEach(function(b){'+
-      'var f=pt(b); while(b.scrollWidth>b.clientWidth && f>12){ f--; b.style.fontSize=f+"pt"; }'+
-    '});'+
-    'var q=s.querySelector(".row.q"), b=q && q.querySelector("b");'+
-    'if(b){'+
-      'if(b.scrollWidth>b.clientWidth) q.classList.add("stack");'+
-      'var f=pt(b); while(f>12){'+
-        'var w=b.scrollWidth>b.clientWidth; if(!w && !over(s)) break;'+
-        'var h0=s.scrollHeight; f--; b.style.fontSize=f+"pt";'+
-        'if(!w && s.scrollHeight>=h0){ f++; b.style.fontSize=f+"pt"; break; }'+   // chhota karne se fayda nahi
-      '}'+
-    '}'+
-  '});'+
-'})();<\/script>';
 function stickerHTML(info, kind, num, total, grossQty, wt, sheetOverride){
   var isB = kind==='BUNDLE';
   var totalSheet = (sheetOverride!==undefined && sheetOverride!==null) ? sheetOverride : round(grossQty*(parseFloat(info.spg)||0),0);
-  var big = function(l,v){ return '<div class="row bg"><span>'+l+'</span><b>'+v+'</b></div>'; };
-  var sm  = function(l,v){ return '<div class="row"><span>'+l+'</span><b>'+v+'</b></div>'; };
   return '<div class="stk">'+
-    '<div class="hd">'+        // upar: PO | heading | number (PO sticker me GROSS/BUNDLE bhi)
-      '<span>'+(info.po ? 'PO: <b>'+H(info.po)+'</b>' : '')+'</span>'+
-      (info.heading ? '<span class="brand">'+H(info.heading)+'</span>' : '')+
-      '<span style="font-size:9pt;font-weight:bold;">'+(info.manual ? '' : kind+' ')+num+' / '+total+'</span>'+
+    '<div>'+
+      (info.heading ? '<div class="brand">'+H(info.heading)+'</div>' : '')+
+      '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+        '<span class="tag">'+kind+'</span>'+
+        '<span style="font-size:15pt;font-weight:bold;">'+num+' / '+total+'</span>'+
+      '</div>'+
+      (info.manual ? '' : '<div class="item">'+H(info.item||'-')+'</div>')+
     '</div>'+
-    '<div class="grid">'+
-      '<div>'+                 // column 1: SIZE, QUALITY (badi value)
-        '<div class="row bg sz"><span>SIZE</span><b>'+H(info.size)+'</b></div>'+
-        '<div class="row bg q"><span>QUALITY</span><b>'+H(info.item||'-')+'</b></div>'+
-      '</div>'+
-      '<div>'+                 // column 2: GSM badi, baaki chhote
-        big('GSM', H(info.gsm))+
-        (isB ? sm('WT / GROSS', N(info.wtGross,2)+' kg') : sm('WEIGHT', N(wt,2)+' kg'))+
-        sm('SHEET / GROSS', info.spg)+
-        (isB ? sm('GROSS / BUNDLE', grossQty) : '')+
-        (info.manual ? '' : sm('TOTAL SHEET', N(totalSheet,0)))+
-      '</div>'+
+    '<div>'+
+      (info.manual && info.po ? '<div class="row"><span>PO NO</span><b>'+H(info.po)+'</b></div>' : '')+
+      (info.manual ? '<div class="row"><span>QUALITY</span><b>'+H(info.item||'-')+'</b></div>' : '')+
+      '<div class="row"><span>SIZE</span><b>'+H(info.size)+'</b></div>'+
+      '<div class="row"><span>GSM</span><b>'+H(info.gsm)+'</b></div>'+
+      (isB ? '<div class="row"><span>WT / GROSS</span><b>'+N(info.wtGross,2)+' kg</b></div>' : '')+
+      (isB ? '<div class="row"><span>GROSS / BUNDLE</span><b>'+grossQty+'</b></div>' : '')+
+      '<div class="row"><span>SHEET / GROSS</span><b>'+info.spg+'</b></div>'+
+      (info.manual ? '' : '<div class="row"><span>TOTAL SHEET</span><b>'+N(totalSheet,0)+'</b></div>')+
+      (info.date ? '<div class="row"><span>DATE</span><b>'+H(fmtDate(info.date))+'</b></div>' : '')+
+      (isB ? '' : '<div class="row" style="border-bottom:none;"><span>WEIGHT</span><span class="big">'+N(wt,2)+' kg</span></div>')+
     '</div>'+
     '<div class="ft">'+
-      '<span class="pty">'+H(info.party||'')+'</span>'+
-      (info.manual ? '' : '<span>Reel: '+H(info.reel)+'</span>')+
+      (info.manual ? '<span>'+H(info.party||'')+'</span>'
+                   : '<span>PO: <b>'+H(info.po)+'</b></span><span>'+H(info.party||'')+'</span><span>Reel: '+H(info.reel)+'</span>')+
     '</div>'+
   '</div>';
 }
